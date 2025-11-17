@@ -63,9 +63,9 @@ url_2407 = (
     + fname_2407
 )
 
-filename_2507 = "PF_ESB_HSB2507_v2025p1/PF_ESB_HSB2507_v2025p1.spi"
-fname_2507 = "PF_ESB_HSB2507_v2025p1.zip"
-expected_md5_2507 = "e27289503290a3a0aa709830a50cf111"
+filename_2507 = "PF_ESB_HSB2507_v2025p1_v2.spi"
+fname_2507 = "PF_ESB_HSB2507_v2025p1_v2.zip"
+expected_md5_2507 = "ad73027763326d674148f06dd9c6a00a"
 url_2507 = (
     "https://ww1.microchip.com/downloads/aemDocuments/documents/FPGA/SOCDesignFiles/"
     + fname_2507
@@ -224,6 +224,7 @@ def manual_enumeration(args):
         "fpga_uuid": "ed6a9292-debf-40ac-b603-a24e025309c1",
         "vsync_enable": 0,
         "ptp_enable": 0,
+        "block_enable": 0,
     }
     metadata = hololink_module.Metadata(m)
     hololink_module.DataChannel.use_data_plane_configuration(metadata, 0)
