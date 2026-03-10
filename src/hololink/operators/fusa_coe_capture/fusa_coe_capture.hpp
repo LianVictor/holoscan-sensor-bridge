@@ -107,10 +107,12 @@ private:
     std::atomic<bool> stop_thread_;
     std::mutex buffer_mutex_;
     std::condition_variable buffer_acquired_;
+    std::condition_variable buffer_available_;
 
     struct BufferInfo {
-        BufferInfo(FusaCoeCaptureOp* parent)
+        BufferInfo(FusaCoeCaptureOp* parent, uint32_t index)
             : parent_(parent)
+            , index_(index)
         {
         }
 
@@ -122,11 +124,14 @@ private:
 
         // Holds reference to parent for the sake of the release callback.
         FusaCoeCaptureOp* parent_ = nullptr;
+        uint32_t index_ = 0;
     };
 
     std::deque<BufferInfo*> available_buffers_; // Buffers available for new capture requests.
     std::queue<BufferInfo*> in_flight_captures_; // Buffers in use for in-flight captures.
     BufferInfo* acquired_buffer_ = nullptr; // Last buffer acquired from capture.
+
+    uint32_t next_reissue_index_ = 0; // Next expected buffer index for FIFO-ordered issue.
 
     // Pending buffers that have been wrapped and passed to downstream operators and have not yet
     // been released. This map is static since the callback provides only the CUDA device pointer.

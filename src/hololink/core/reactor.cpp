@@ -334,5 +334,23 @@ namespace core {
         (void)bytes_written; // Suppress unused variable warning
     }
 
+    /**
+     * pytest calls this between tests so that we can prove we don't have
+     * any lingering alarms.
+     */
+    void Reactor::reset_framework()
+    {
+        ssize_t alarms = alarms_.size();
+        if (alarms > 0) {
+            throw std::runtime_error("Reactor still has " + std::to_string(alarms) + " alarms configured.");
+        }
+
+        // Note that there is always 1 here for the control channel.
+        ssize_t fd_callbacks = fd_callbacks_.size();
+        if (fd_callbacks > 1) {
+            throw std::runtime_error("Reactor still has " + std::to_string(fd_callbacks) + " fd_callbacks configured.");
+        }
+    }
+
 } // namespace core
 } // namespace hololink

@@ -222,7 +222,7 @@ def get_timestamp(metadata, name):
 
 def record_times(recorder_queue, metadata, expected_fps=60):
     #
-    now = datetime.datetime.now(datetime.UTC)
+    now = datetime.datetime.now(datetime.timezone.utc)
     #
     frame_number = metadata.get("frame_number", 0)
 
@@ -311,7 +311,7 @@ class InstrumentedTimeProfiler(holoscan.core.Operator):
 
     def compute(self, op_input, op_output, context):
         # What time is it now?
-        operator_timestamp = datetime.datetime.now(datetime.UTC)
+        operator_timestamp = datetime.datetime.now(datetime.timezone.utc)
 
         in_message = op_input.receive("input")
         cp_frame = cp.asarray(in_message.get(""))
@@ -344,7 +344,7 @@ class MonitorOperator(holoscan.core.Operator):
 
     def compute(self, op_input, op_output, context):
         # What time is it now?
-        complete_timestamp = datetime.datetime.now(datetime.UTC)
+        complete_timestamp = datetime.datetime.now(datetime.timezone.utc)
         _ = op_input.receive("input")
 
         # save the complete timestamp and record the times

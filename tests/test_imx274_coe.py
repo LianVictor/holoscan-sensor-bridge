@@ -163,6 +163,7 @@ class DualCoeTestApplication(holoscan.core.Application):
             coe_interface=self._coe_interface_left,
             pixel_width=self._camera_left._width,
             coe_channel=self._coe_channel_left,
+            receiver_affinity=[2],
         )
         receiver_right = hololink_module.operators.LinuxCoeReceiverOp(
             self,
@@ -175,6 +176,7 @@ class DualCoeTestApplication(holoscan.core.Application):
             coe_interface=self._coe_interface_right,
             pixel_width=self._camera_right._width,
             coe_channel=self._coe_channel_right,
+            receiver_affinity=[3],
         )
 
         isp_left = hololink_module.operators.ImageProcessorOp(

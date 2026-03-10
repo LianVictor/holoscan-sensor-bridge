@@ -57,9 +57,9 @@ __global__ void packed12bitTo16bit(unsigned short* output, const unsigned char* 
     int output_index = (idx_y * width) + (idx_x * 2);
 
     output[output_index]     = (input[input_index + 1] << 12 |
-                                input[input_index + 2] << 4) & 0xFFC0;
+                                input[input_index + 2] << 4) & 0xFFF0;
     output[output_index + 1] = (input[input_index] << 8 |
-                                input[input_index + 1]) & 0xFFC0;
+                                input[input_index + 1]) & 0xFFF0;
 }
 
 })";
@@ -81,7 +81,6 @@ void PackedFormatConverterOp::setup(holoscan::OperatorSpec& spec)
         "Name of the input tensor", std::string(""));
     spec.param(out_tensor_name_, "out_tensor_name", "OutputTensorName",
         "Name of the output tensor", std::string(""));
-    cuda_stream_handler_.define_params(spec);
 }
 
 void PackedFormatConverterOp::start()
@@ -122,15 +121,6 @@ void PackedFormatConverterOp::compute(holoscan::InputContext& input, holoscan::O
     }
 
     auto& entity = static_cast<nvidia::gxf::Entity&>(maybe_entity.value());
-
-    // get the CUDA stream from the input message
-    gxf_result_t stream_handler_result
-        = cuda_stream_handler_.from_message(context.context(), entity);
-    if (stream_handler_result != GXF_SUCCESS) {
-        throw std::runtime_error(fmt::format(
-            "Failed to get the CUDA stream from incoming messages: {}",
-            GxfResultStr(stream_handler_result)));
-    }
 
     const auto maybe_tensor = entity.get<nvidia::gxf::Tensor>(in_tensor_name_.get().c_str());
     if (!maybe_tensor) {
@@ -179,7 +169,9 @@ void PackedFormatConverterOp::compute(holoscan::InputContext& input, holoscan::O
     }
 
     hololink::common::CudaContextScopedPush cur_cuda_context(cuda_context_);
-    const cudaStream_t cuda_stream = cuda_stream_handler_.get_cuda_stream(context.context());
+    // Get the CUDA stream from the input message if present, otherwise generate one.
+    // This stream will also be transmitted on the output port.
+    const cudaStream_t cuda_stream = input.receive_cuda_stream();
 
     switch (pixel_format_) {
     case hololink::csi::PixelFormat::RAW_10:
@@ -200,12 +192,6 @@ void PackedFormatConverterOp::compute(holoscan::InputContext& input, holoscan::O
         break;
     default:
         throw std::runtime_error("Unsupported bits per pixel value");
-    }
-
-    // pass the CUDA stream to the output message
-    stream_handler_result = cuda_stream_handler_.to_message(out_message);
-    if (stream_handler_result != GXF_SUCCESS) {
-        throw std::runtime_error("Failed to add the CUDA stream to the outgoing messages");
     }
 
     // Emit the tensor

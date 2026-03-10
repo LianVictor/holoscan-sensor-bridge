@@ -63,7 +63,7 @@ setuptools.setup(
         cmake_build_extension.CMakeExtension(
             name="_hololink",
             # Name of the resulting package name (import hololink)
-            install_prefix="hololink",
+            install_prefix="",
             # Selects the folder where the main CMakeLists.txt is stored
             source_dir="..",
             cmake_configure_options=[
@@ -74,8 +74,10 @@ setuptools.setup(
                 f"-DHOLOLINK_BUILD_ARGUS_ISP={'ON' if os.path.isdir('/usr/src/jetson_multimedia_api/argus') else 'OFF'}",
                 f"-DHOLOLINK_BUILD_SIPL={'ON' if os.path.isdir('/usr/src/jetson_sipl_api') else 'OFF'}",
                 f"-DHOLOLINK_BUILD_FUSA={'ON' if os.path.isdir('/usr/src/jetson_sipl_api/sipl/fusa') else 'OFF'}",
+                f"-DHOLOLINK_BUILD_PVA={'ON' if os.path.isdir('/opt/nvidia/pva-sdk-2.9') else 'OFF'}",
                 # Add this to debug the code
                 # "-DCMAKE_BUILD_TYPE=Debug",
+                "-DHOLOLINK_PYTHON_INSTALL_DIR:PATH=.",
             ],
         ),
     ],

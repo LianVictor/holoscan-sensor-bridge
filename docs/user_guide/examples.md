@@ -286,7 +286,7 @@ exit
 
 **This example will not run on AGX Thor**
 
-## Running the Latency for IMX274 example
+## Running the Latency Application for IMX274 example
 
 For IGX systems, `examples/imx274_latency.py` shows an example of how to use timestamp
 to profile hardware and software pipeline. This example demonstrates recording
@@ -333,7 +333,7 @@ python3 examples/ecam0m30tof_player.py --hololink 192.168.0.2 --camera-mode=<0|1
 
 **This example will not run on AGX Thor**
 
-## Running the frame validation example for IMX274
+## Running frame validation examples
 
 Frame validation examples demonstrate how to access frame metadata in order to detect
 missing frames, frame timestamp misalignment and frame CRC errors. These examples record
@@ -344,7 +344,9 @@ with average, minimum, and maximum values. These values are collected during the
 application run to assess the impact of various detection mechanisms on the latency of
 the pipeline.
 
-### Linux Receiver
+### IMX274
+
+#### Linux Receiver
 
 For AGX systems (or unaccelerated configurations),
 `examples/linux_imx274_frame_validation.py` uses standard Linux sockets for network
@@ -370,7 +372,7 @@ $ python3 examples/linux_imx274_frame_validation.py --crc-frame-check 50
 
 In this example, the application will check for CRC32 frame errors every 50 frames.
 
-### RoCE Receiver
+#### RoCE Receiver
 
 For systems with RDMA-capable network hardware (ConnectX NICs) such as IGX Orin,
 `examples/imx274_frame_validation.py` provides high-performance frame validation with
@@ -403,13 +405,13 @@ $ python3 examples/stereo_imx274_frame_validation.py
 
 #### Performance
 
-The nvCOMP CRC calculation performance on IGX-dGPU for single-camera configuration
-(measured over 1000 frames):
+The nvCOMP CRC calculation performance on IGX-dGPU for single-camera configuration with
+4K resolution (measured over 1000 frames):
 
 ```text
-Minimum: 0.275 ms
-Maximum: 0.390 ms
-Average: 0.295 ms
+Minimum: 275 us
+Maximum: 390 us
+Average: 295 us
 ```
 
 **Note on Startup Performance:** Runtime performance of an HSDK pipeline at startup can
@@ -424,3 +426,261 @@ frames have been received. User applications would likely use a similar startup 
 avoid misleading errors occurring due to this known condition.
 
 **This example will not run on AGX Thor**
+
+## Running the UART dual-board example
+
+`examples/uart_dual_board_loopback.py` tests UART between two boards.
+
+**Hardware setup**: Connect Board 1 GPIO 10 (TX) to Board 2 GPIO 11 (RX) and Board 2
+GPIO 10 (TX) to Board 1 GPIO 11 (RX). See
+[Lattice Bajoran Board GPIO Pin Locations](https://docscontent.nvidia.com/dims4/default/133096d/2147483647/strip/true/crop/2400x1016+0+0/resize/1440x610!/format/webp/quality/90/?url=https%3A%2F%2Fk3-prod-nvidia-docs.s3.us-west-2.amazonaws.com%2Fbrightspot%2Fsphinx%2F0000019b-b3d8-d33f-abbb-fbda31f40000%2Fholoscan%2Fsensor-bridge%2Flatest%2F_images%2FLattice-Bajoran-Board-front.png)
+to identify the pins.
+
+Two modes are supported: **one-way** (`tx`/`rx`), with one board sending and the other
+receiving, and **dual**, where both boards send and receive.
+
+**One-way (tx/rx)** — one board transmits, one receives:
+
+```sh
+# Terminal 1 (receiver):
+$ python3 examples/uart_dual_board_loopback.py --mode rx --hololink 192.168.2.2
+
+# Terminal 2 (transmitter):
+$ python3 examples/uart_dual_board_loopback.py --mode tx --hololink 192.168.0.2
+```
+
+**Dual mode** — both boards transmit and receive:
+
+```sh
+# Terminal 1 (board 1):
+$ python3 examples/uart_dual_board_loopback.py --mode dual --hololink 192.168.0.2 --test-string "HELLO" --expected-rx-string "WORLD"
+
+# Terminal 2 (board 2):
+$ python3 examples/uart_dual_board_loopback.py --mode dual --hololink 192.168.2.2 --test-string "WORLD" --expected-rx-string "HELLO"
+```
+
+Pass `--mode` (`tx`, `rx`, or `dual`), `--hololink` for each board's IP, and optionally
+`--test-string`, `--expected-rx-string`, and `--flow-control` in dual mode. Run with
+`--help` for all options.
+
+The UART FIFO size is 256 bytes. Both applications chunk data accordingly and verify
+transmitted vs. received data.
+
+### VB1940 Eagle
+
+#### FUSA CoE Receiver (nvCOMP)
+
+For systems with FUSA (Functional Safety) CoE (Camera over Ethernet) support such as AGX
+Thor, `examples/vb1940_fusa_nvcomp_crc_validation.py` provides high-performance frame
+validation with GPU-accelerated CRC checking using nvCOMP 5.0. This example uses the
+FUSA CoE capture operator for accelerated network data transfer.
+
+Before running the app,
+[enable PTP sync](https://docs.nvidia.com/holoscan/sensor-bridge/latest/setup.html#) on
+your setup, then use the following command:
+
+```sh
+$ python3 examples/vb1940_fusa_nvcomp_crc_validation.py
+```
+
+[GPU-based CRC using nvCOMP 5.0](https://docs.nvidia.com/cuda/nvcomp/crc32.html) is fast
+enough to validate every frame by default. The application computes CRC on the full CSI
+frame (including CSI header and trailing bytes) to match the camera's FPGA CRC
+computation.
+
+At the end of execution, the application provides a CRC validation report showing total
+frames processed, CRC errors detected, and success rate, followed by detailed
+performance metrics including frame time, FUSA capture latency, operator latency, and
+processing time.
+
+#### Performance
+
+The nvCOMP CRC calculation performance on AGX Thor for VB1940 camera configuration
+(measured over 1000 frames):
+
+```text
+Minimum: 0.5544 ms
+Maximum: 0.6310 ms
+Average: 0.6143 ms
+```
+
+## Running PVA CRC validation examples
+
+PVA CRC validation examples demonstrate hardware-accelerated CRC computation using
+NVIDIA PVA (Programmable Vision Accelerator) to validate camera frames. These examples
+compare PVA-computed CRC values against camera FPGA-embedded CRC values to detect data
+corruption.
+
+For requirements and build instructions, see the
+[PVA CRC README](../../python/hololink/operators/pva_crc/README.md).
+
+To run the PVA CRC validation examples, first set the `LD_LIBRARY_PATH` environment
+variable (required before running any application). Within the demo container:
+
+```sh
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/aarch64-linux-gnu/tegra/:/opt/nvidia/pva-sdk-2.9/lib/aarch64-linux-gnu/:/usr/lib/aarch64-linux-gnu/nvidia
+```
+
+To run the IMX274 PVA CRC validation example (tested on IGX Orin with dGPU):
+
+```sh
+$ python3 examples/imx274_pva_crc_validation.py --frame-limit 100
+```
+
+To run the VB1940 PVA CRC validation example (tested on AGX Thor):
+
+```sh
+$ python3 examples/vb1940_fusa_pva_crc_validation.py --frame-limit 100
+```
+
+### Performance
+
+#### IMX274
+
+The PVA CRC calculation performance on IGX-dGPU for single-camera configuration with 4K
+resolution (measured over 1000 frames):
+
+```text
+Minimum: 412 us
+Maximum: 442 us
+Average: 414 us
+```
+
+#### VB1940
+
+The PVA CRC calculation performance on AGX Thor for single-camera configuration with
+1080p resolution (measured over 1000 frames):
+
+```text
+Minimum: 106 us
+Maximum: 137 us
+Average: 111 us
+```
+
+## Sub-Frame Processing Examples
+
+Sub-frame processing allows high-resolution sensor data frames to be processed and
+displayed incrementally as they arrive, reducing latency and enabling progressive
+display. See the
+[Sub-Frame Processing Applications](applications.md#sub-frame-processing-applications)
+section for detailed information about how sub-frame processing works.
+
+### IMX274 Sub-Frame Player Example
+
+The sub-frame IMX274 player example demonstrates processing and displaying camera frames
+as sub-frames rather than complete frames. This enables lower latency visualization for
+high-resolution cameras.
+
+`````{tab-set}
+````{tab-item} Python
+```sh
+# With ConnectX accelerated network controller
+$ python3 examples/sub_frame_imx274_player.py --sub-frame-rows 540
+
+# For unaccelerated configurations (e.g. AGX Orin, AGX Thor)
+$ python3 examples/linux_sub_frame_imx274_player.py --sub-frame-rows 540
+```
+
+The `--sub-frame-rows` parameter specifies the number of rows per sub-frame.
+
+**NOTE:** `sub_frame_rows` must evenly divide the frame height. For example, a valid value would be
+`--sub-frame-rows 540` (2160 ÷ 540 = 4 sub-frames).
+
+````
+````{tab-item} C++
+
+The C++ examples need to be built first using these commands:
+
+```sh
+$ export BUILD_DIR=$(pwd)/build
+$ cd $BUILD_DIR
+$ cmake ..
+$ make -j
+```
+
+After examples are built, you can run the sub-frame IMX274 player:
+
+```sh
+# With ConnectX accelerated network controller
+$ $BUILD_DIR/examples/sub_frame_imx274_player --sub-frame-rows 540
+
+# For unaccelerated configurations
+$ $BUILD_DIR/examples/linux_sub_frame_imx274_player --sub-frame-rows 540
+```
+
+````
+`````
+
+### Sub-Frame Processing Mode
+
+Sub-frame examples use **Sub-Frame Combiner Mode**: Sub-frames are combined into
+complete frames before display. This provides traditional frame-based display with
+reduced memory requirements.
+
+### Sub-Frame Configuration Parameters
+
+- **`sub_frame_rows`**: Number of rows per sub-frame. Set to 0 to disable sub-frame
+  processing (full-frame mode). **Must evenly divide the frame height.**
+
+### Performance Considerations
+
+- **Memory**: Smaller sub-frames reduce memory requirements but increase processing
+  overhead. The `SubFrameCombinerOp` waits for all sub-frames to arrive before emitting
+  a complete frame, or emits an incomplete frame if a sub-frame is dropped and the next
+  frame starts.
+
+- **Network**: Sub-frame size should align with network packet sizes to minimize partial
+  sub-frames and improve efficiency.
+
+## Running PVA CRC validation examples
+
+PVA CRC validation examples demonstrate hardware-accelerated CRC computation using
+NVIDIA PVA (Programmable Vision Accelerator) to validate camera frames. These examples
+compare PVA-computed CRC values against camera FPGA-embedded CRC values to detect data
+corruption.
+
+For requirements and build instructions, see the
+[PVA CRC README](../../python/hololink/operators/pva_crc/README.md).
+
+To run the PVA CRC validation examples, first set the `LD_LIBRARY_PATH` environment
+variable (required before running any application). Within the demo container:
+
+```sh
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/aarch64-linux-gnu/tegra/:/opt/nvidia/pva-sdk-2.9/lib/aarch64-linux-gnu/:/usr/lib/aarch64-linux-gnu/nvidia
+```
+
+To run the IMX274 PVA CRC validation example (tested on IGX Orin with dGPU):
+
+```sh
+$ python3 examples/imx274_pva_crc_validation.py --frame-limit 100
+```
+
+To run the VB1940 PVA CRC validation example (tested on AGX Thor):
+
+```sh
+$ python3 examples/vb1940_fusa_pva_crc_validation.py --frame-limit 100 
+```
+
+### Performance
+
+#### IMX274
+
+The PVA CRC calculation performance on IGX-dGPU for single-camera configuration with 4K
+resolution (measured over 1000 frames):
+
+```text
+Minimum: 412 us
+Maximum: 442 us
+Average: 414 us
+```
+
+#### VB1940
+
+The PVA CRC calculation performance on AGX Thor for single-camera configuration with
+1080p resolution (measured over 1000 frames):
+
+```text
+Minimum: 106 us
+Maximum: 137 us
+Average: 111 us
+```

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# SPDX-FileCopyrightText: Copyright (c) 2023 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -26,12 +26,12 @@ dgpu=0
 usage=1
 GPU_CONFIG=
 # HSDK follows Major.Minor.Patch versioning scheme
-HSDK_VERSION="3.9.0"
+HSDK_VERSION="3.11.0"
 
 # detected and populated in script and used in docker build command
 PROTOTYPE_OPTIONS=""
 CONTAINER_TYPE=
-HSDK_CONTAINER_CONFIG=
+L4T_VERSION=
 
 while [ $# -gt 0 ]
 do
@@ -83,45 +83,6 @@ if [ -z "$PRODUCT_NAME" ] || [ "$PRODUCT_NAME" = "Unknown" ]
 then
     echo "Warning: Cannot determine product name from DMI. This system/configuration may not be supported."
 fi
-
-# check to make sure user can run nvidia-smi without sudo.
-# For example, on AGX Orin running Jetpack 6, the user configured with SDK Manager and the next user will have
-# sufficient permissions/group access but any subsequently added users will not be in the proper groups to run
-#basic utilities requiring access to the GPU.
-if ! nvidia-smi > /dev/null 2>&1 
-then
-    echo "Error: User \"${USER}\" does not have permission to run nvidia-smi. Please add the user to the appropriate groups to run GPU utilities, e.g. 'video' and 'render' groups on l4t."
-    exit 1
-fi
-
-# determine the CUDA driver compatibility version (Major)
-# CTK may not be installed and nvcc only reports the runtime API version.
-# nvidia-smi reports the CUDA display driver version, circa driver version 410.72, so should CUDA version 11+ 
-# on arm64 or x86_64 platforms.
-DRIVER_CUDA_VERSION_MAJOR=$(nvidia-smi | grep -oE "CUDA Version: [0-9]+" | awk '{print $3}' )
-
-# handle HSDK version
-HSDK_MAJOR_VERSION=${HSDK_VERSION%%.*}
-HSDK_MINOR_PATCH=${HSDK_VERSION#*.}
-HSDK_MINOR_VERSION=${HSDK_MINOR_PATCH%.*}
-HSDK_PATCH_VERSION=${HSDK_VERSION##*.}
-
-HSDK_CONTAINER_CONFIG="v$HSDK_VERSION"
-
-# HSDK versions 3.6.1+ currently require differentiation of the cuda version
-if [ $HSDK_MAJOR_VERSION -eq 3 ]
-then
-    if [ $HSDK_MINOR_VERSION -eq 6 ] && [ $HSDK_PATCH_VERSION -gt 0 ] || [ $HSDK_MINOR_VERSION -gt 6 ]
-    then
-        HSDK_CONTAINER_CONFIG="${HSDK_CONTAINER_CONFIG}-cuda${DRIVER_CUDA_VERSION_MAJOR}"
-    fi
-fi
-# CUDA 13 and HSDK containers based on it do not distinguish jetson (igpu) vs sbsa (dgpu) GPU_CONFIGs anymore
-if [ "$HSDK_VERSION" = "3.6.1" ] || [ $DRIVER_CUDA_VERSION_MAJOR -lt 13 ]
-then
-    HSDK_CONTAINER_CONFIG="${HSDK_CONTAINER_CONFIG}-${GPU_CONFIG}"
-fi
-
 
 # Do a bit of environment checking:
 # If we're running 'connmand' (e.g. IGX deployment)
@@ -205,7 +166,6 @@ check_l4t() {
         exit 1
     fi
 
-    PROTOTYPE_OPTIONS="$PROTOTYPE_OPTIONS --build-arg L4T_VERSION=$L4T_VERSION "
     PROTOTYPE_OPTIONS="$PROTOTYPE_OPTIONS --build-context l4t-libs=$L4T_LIBRARIES_PATH "
     PROTOTYPE_OPTIONS="$PROTOTYPE_OPTIONS --build-context l4t-src=/usr/src "
 }
@@ -217,28 +177,35 @@ HERE=`dirname "$SCRIPT"`
 ROOT=`realpath "$HERE/.."`
 VERSION=`cat $ROOT/VERSION`
 
+# default cuda 13 container type
+CONTAINER_TYPE=cuda13
+# check if l4t product
+if [ -f /etc/nv_tegra_release ] ;
+then
+    check_l4t "$PRODUCT_NAME"
+fi
+
+# PVA SDK build context (only add if directory exists, otherwise use empty context)
+# PVA SDK 2.9 (optional for build context)
+if [ -d "/opt/nvidia/pva-sdk-2.9" ]; then
+    PROTOTYPE_OPTIONS="$PROTOTYPE_OPTIONS --build-context pva-sdk=/opt/nvidia "
+else
+    # Create empty build context directory to avoid Docker build errors
+    # Dockerfile will gracefully skip PVA SDK copy if not present
+    mkdir -p /tmp/empty-pva-context
+    PROTOTYPE_OPTIONS="$PROTOTYPE_OPTIONS --build-context pva-sdk=/tmp/empty-pva-context "
+fi
+
 if [ $igpu -ne 0 ]
 then
+    if [ -n "$L4T_VERSION_MAJOR" ] && [ $L4T_VERSION_MAJOR -eq 36 ]
+    then
+        CONTAINER_TYPE=cuda12_igpu
+    fi
+    
     if echo $PRODUCT_NAME | grep -q "AGX Thor"
     then
-        # AGX Thor configuration
-        CONTAINER_TYPE=igpu_sipl
-        check_l4t "$PRODUCT_NAME"
-    elif echo $PRODUCT_NAME | grep -q "Spark"
-    then
-        # DGX Spark configuration
-        CONTAINER_TYPE=igpu_spark
-        # no l4t check here -- not l4t
-    else
-        # other igpu configurations
-        CONTAINER_TYPE=igpu
-        if (echo $PRODUCT_NAME | grep -q "Orin") || (echo $PRODUCT_NAME | grep -q "Thor")
-        then
-            check_l4t "$PRODUCT_NAME"
-        else
-            # build an igpu container as requested, but some of the checks/pre-build configurations may not be present
-            echo "WARNING: product \"$PRODUCT_NAME\" not recognized. defaulting to basic igpu container configuration"
-        fi
+        CONTAINER_TYPE=cuda13_sipl
     fi
 elif [ $dgpu -ne 0 ]
 then
@@ -248,7 +215,12 @@ then
         echo "Error: product \"$PRODUCT_NAME\" does not have a supported dgpu configuration"
         exit 1
     fi
-    CONTAINER_TYPE=dgpu
+
+    if echo $PRODUCT_NAME | grep -q "Orin"
+    then
+        # IGX Orin dgpu
+        CONTAINER_TYPE=cuda12_dgpu
+    fi
 fi
 
 
@@ -262,14 +234,23 @@ then
 INSTALL_ENVIRONMENT="taskset -c 0-2"
 fi
 
+# Detect GPU archs on the host and pass to Docker (nvidia-smi cannot run inside the
+# container during build). User can override with CUDA_ARCHS="90 100" ./build.sh ...
+if [ -z "${CUDA_ARCHS:-}" ] && command -v nvidia-smi >/dev/null 2>&1; then
+    CUDA_ARCHS="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader \
+        | tr -d '.' | sort -u)"
+fi
+# CMake CUDAARCHS (set in Dockerfile) expects semicolon-separated list
+CUDA_ARCHS="$(echo "${CUDA_ARCHS:-}" | tr ' ' ';')"
+
 # temporarily disable tracing to output configuration variables
 set +x
 echo "PRODUCT_NAME: $PRODUCT_NAME"
-echo "DRIVER_CUDA_VERSION_MAJOR: $DRIVER_CUDA_VERSION_MAJOR"
-echo "HSDK_CONTAINER_CONFIG: $HSDK_CONTAINER_CONFIG"
+echo "HSDK_VERSION: $HSDK_VERSION"
 echo "CONTAINER_TYPE: $CONTAINER_TYPE"
 echo "PROTOTYPE_OPTIONS: $PROTOTYPE_OPTIONS"
 echo "INSTALL_ENVIRONMENT: $INSTALL_ENVIRONMENT"
+echo "L4T_VERSION: $L4T_VERSION"
 set -x
 
 # Build the development container.  We specifically rely on buildkit skipping
@@ -278,8 +259,9 @@ set -x
 DOCKER_BUILDKIT=1 docker build \
     --network=host \
     --build-arg "CONTAINER_TYPE=$CONTAINER_TYPE" \
-    --build-arg "HSDK_CONTAINER_CONFIG=$HSDK_CONTAINER_CONFIG" \
-    --build-arg "DRIVER_CUDA_VERSION_MAJOR=$DRIVER_CUDA_VERSION_MAJOR" \
+    --build-arg "HSDK_VERSION=$HSDK_VERSION" \
+    --build-arg "L4T_VERSION=$L4T_VERSION" \
+    --build-arg "CUDA_ARCHS=$CUDA_ARCHS" \
     -t hololink-prototype:$VERSION \
     -f $HERE/Dockerfile \
     $PROTOTYPE_OPTIONS \

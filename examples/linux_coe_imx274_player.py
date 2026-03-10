@@ -83,7 +83,7 @@ class TimingReportOperator(holoscan.core.Operator):
 
     def compute(self, op_input, op_output, context):
         # What time is it now?
-        complete_timestamp = datetime.datetime.now(datetime.UTC)
+        complete_timestamp = datetime.datetime.now(datetime.timezone.utc)
 
         #
         _ = op_input.receive("input")

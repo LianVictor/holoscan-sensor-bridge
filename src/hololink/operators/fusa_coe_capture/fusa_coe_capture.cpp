@@ -17,6 +17,8 @@
 
 #include "fusa_coe_capture.hpp"
 
+#include <algorithm>
+
 #include <hololink/common/cuda_error.hpp>
 #include <hololink/common/cuda_helper.hpp>
 #include <hololink/core/data_channel.hpp>
@@ -118,6 +120,9 @@ void FusaCoeCaptureOp::start()
     hololink_channel_.get()->configure_coe(coe_handler_->getChannelNumber(),
         frame_size, bytes_per_line_);
 
+    // Start streaming.
+    device_start_.get()();
+
     // Issue initial capture requests.
     while (available_buffers_.size() > 0) {
         if (!issue_capture()) {
@@ -128,9 +133,6 @@ void FusaCoeCaptureOp::start()
     // Start the capture acquisition thread.
     stop_thread_.store(false);
     acquire_thread_ = std::thread(&FusaCoeCaptureOp::acquire_buffer_thread_func, this);
-
-    // Start streaming.
-    device_start_.get()();
 }
 
 void FusaCoeCaptureOp::stop()
@@ -139,6 +141,7 @@ void FusaCoeCaptureOp::stop()
     // terminating and needs to be done before stopping the device stream below.
     if (acquire_thread_.joinable()) {
         stop_thread_.store(true);
+        buffer_available_.notify_all();
         acquire_thread_.join();
     }
 
@@ -167,8 +170,17 @@ void FusaCoeCaptureOp::stop()
 
 void FusaCoeCaptureOp::acquire_buffer_thread_func()
 {
-    while (in_flight_captures_.size() > 0) {
-        // Acquire the next capture.
+    while (!stop_thread_.load()) {
+        // Wait for a buffer to reissue if we've drained all in-flight captures.
+        if (in_flight_captures_.empty()) {
+            std::unique_lock<std::mutex> lock(buffer_mutex_);
+            buffer_available_.wait(lock, [this] {
+                return stop_thread_.load() || issue_capture();
+            });
+            continue;
+        }
+
+        // Wait for the next capture to complete.
         auto buffer = in_flight_captures_.front();
         auto status = coe_handler_->getCaptureStatus(buffer->sci_buf_, timeout_.get());
         if (status != NvFusaCaptureStatus::OK) {
@@ -185,14 +197,8 @@ void FusaCoeCaptureOp::acquire_buffer_thread_func()
         acquired_buffer_ = buffer;
         buffer_acquired_.notify_all();
 
-        // Issue new capture requests (unless stop has been requested).
-        if (!stop_thread_.load()) {
-            while (available_buffers_.size() > 0) {
-                if (!issue_capture()) {
-                    throw std::runtime_error("Failed to issue capture request");
-                }
-            }
-        }
+        // Reissue capture requests for any available buffers.
+        while (issue_capture()) { }
     }
 
     // Return any unused buffers.
@@ -234,6 +240,7 @@ void FusaCoeCaptureOp::compute(holoscan::InputContext& op_input,
         meta->set("metadata_s", int64_t(frame_metadata.metadata_s));
         meta->set("metadata_ns", int64_t(frame_metadata.metadata_ns));
         meta->set("crc", int64_t(frame_metadata.crc));
+        meta->set("frame_number", int64_t(frame_metadata.frame_number));
     }
 
     // Create the output Tensor to wrap the buffer.
@@ -443,7 +450,7 @@ bool FusaCoeCaptureOp::alloc_sci_buf(NvSciBufObj& buf_obj, size_t& size)
 bool FusaCoeCaptureOp::alloc_buffers()
 {
     for (uint32_t i = 0; i < capture_queue_depth_; i++) {
-        available_buffers_.push_back(new BufferInfo(this));
+        available_buffers_.push_back(new BufferInfo(this, i));
 
         auto buffer = available_buffers_.back();
         if (!alloc_sci_buf(buffer->sci_buf_, buffer->size_)) {
@@ -553,22 +560,26 @@ void FusaCoeCaptureOp::unregister_buffers()
 
 bool FusaCoeCaptureOp::issue_capture()
 {
-    if (available_buffers_.empty()) {
-        HSB_LOG_ERROR("No available buffers to issue capture");
+    // Find the buffer matching the next expected FIFO index.
+    auto it = std::find_if(available_buffers_.begin(), available_buffers_.end(),
+        [this](const BufferInfo* buf) { return buf->index_ == next_reissue_index_; });
+
+    if (it == available_buffers_.end()) {
         return false;
     }
 
     // Issue capture.
-    auto buffer = available_buffers_.front();
+    auto buffer = *it;
+    available_buffers_.erase(it);
     NvFusaCaptureStatus status = coe_handler_->startCapture(buffer->sci_buf_);
     if (status != NvFusaCaptureStatus::OK) {
-        HSB_LOG_ERROR("Failed to start capture: {}", static_cast<int>(status));
-        return false;
+        throw std::runtime_error(fmt::format(
+            "Failed to start capture: {}", static_cast<int>(status)));
     }
-    available_buffers_.pop_front();
 
-    // Add to in-flight queue.
+    // Add to in-flight queue and advance the FIFO index.
     in_flight_captures_.push(buffer);
+    next_reissue_index_ = (next_reissue_index_ + 1) % capture_queue_depth_;
 
     return true;
 }
@@ -585,9 +596,12 @@ nvidia::gxf::Expected<void> FusaCoeCaptureOp::buffer_release_callback(void* poin
     pending_buffers_.erase(pointer);
     pending_lock.unlock();
 
-    // Add to the available queue.
-    std::lock_guard<std::mutex> buffer_lock(buffer->parent_->buffer_mutex_);
-    buffer->parent_->available_buffers_.push_back(buffer);
+    // Add to the available queue and notify the acquire thread.
+    {
+        std::lock_guard<std::mutex> buffer_lock(buffer->parent_->buffer_mutex_);
+        buffer->parent_->available_buffers_.push_back(buffer);
+    }
+    buffer->parent_->buffer_available_.notify_one();
 
     return nvidia::gxf::Expected<void>();
 }

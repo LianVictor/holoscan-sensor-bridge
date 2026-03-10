@@ -22,8 +22,8 @@
 
 #include <cstdint>
 
+#include "../core/serializer.hpp"
 #include "dlpack/dlpack.h"
-#include "hololink/core/serializer.hpp"
 
 // Note that if monotonic times are critical downstream (accuracy, repeatability or conflict with other system process), this clock must be configurable
 #define FRAME_METADATA_CLOCK CLOCK_REALTIME
@@ -51,7 +51,7 @@ struct FrameMetadata {
  * This is metadata that is associated with all Transmitters that implement the abstract BaseTransmitter class.
  *
  * payload_size: Size of the payload in bytes. Semantics may be up to the type of transmitter.
- * e.g., pre-PAGE_SIZE calculation for LinuxTransmitter
+ * e.g., pre-HSB_PAGE_SIZE calculation for LinuxTransmitter
  */
 struct TransmissionMetadata {
     uint32_t dest_mac_low;

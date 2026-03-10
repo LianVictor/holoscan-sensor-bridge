@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 
 import argparse
@@ -201,7 +201,7 @@ class HoloscanApplication(holoscan.core.Application):
 
         frame_size = csi_to_bayer_operator.get_csi_length()
         frame_context = self._cuda_context
-        receiver_operator = hololink_module.operators.LinuxReceiverOperator(
+        receiver_operator = hololink_module.operators.LinuxReceiverOp(
             self,
             condition,
             name="receiver",
@@ -300,7 +300,7 @@ def main():
     parser.add_argument(
         "--frame-limit",
         type=int,
-        default=None,
+        default=200,
         help="Exit after receiving this many frames",
     )
     default_configuration = os.path.join(

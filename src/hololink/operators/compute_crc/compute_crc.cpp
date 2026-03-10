@@ -54,7 +54,6 @@ void ComputeCrcOp::setup(holoscan::OperatorSpec& spec)
         "Device to use for CUDA operations", 0);
     spec.param(frame_size_, "frame_size", "FrameSize",
         "Upper bound for the size of region to check");
-    cuda_stream_handler_.define_params(spec);
 }
 
 void ComputeCrcOp::start()
@@ -74,7 +73,7 @@ void ComputeCrcOp::start()
     HOLOSCAN_CUDA_CALL(cudaMalloc(&result_dptr_, result_dptr_size));
 
     // We use this to synchronize CRC readout.
-    HOLOSCAN_CUDA_CALL(cudaStreamCreateWithFlags(&stream_, cudaStreamNonBlocking));
+    HOLOSCAN_CUDA_CALL(cudaEventCreate(&event_));
 
     // Initialize CRC options for nvcomp 5.0 API
     memset(&crc_opts_, 0, sizeof(crc_opts_));
@@ -84,7 +83,7 @@ void ComputeCrcOp::start()
     // Note that called this way, stream_ isn't used.
     size_t num_chunks = 1;
     nvcompStatus_t status = nvcompBatchedCRC32GetHeuristicConf(nvcompCRC32IgnoredInputChunkBytes, num_chunks, &crc_opts_.kernel_conf,
-        frame_size_, stream_);
+        frame_size_, 0);
     if (status != nvcompSuccess) {
         throw std::runtime_error(fmt::format("nvcompBatchedCRC32GetHeuristicConf returned {}.", static_cast<int>(status)));
     }
@@ -98,8 +97,8 @@ void ComputeCrcOp::stop()
     message_dptr_ = nullptr;
     HOLOSCAN_CUDA_CALL(cudaFree(result_dptr_));
     result_dptr_ = nullptr;
-    HOLOSCAN_CUDA_CALL(cudaStreamDestroy(stream_));
-    stream_ = 0;
+    HOLOSCAN_CUDA_CALL(cudaEventDestroy(event_));
+    event_ = 0;
 }
 
 void ComputeCrcOp::compute(holoscan::InputContext& input, holoscan::OutputContext& output,
@@ -110,13 +109,6 @@ void ComputeCrcOp::compute(holoscan::InputContext& input, holoscan::OutputContex
         throw std::runtime_error("Failed to receive input");
     }
     auto& entity = static_cast<nvidia::gxf::Entity&>(maybe_entity.value());
-
-    // get the CUDA stream from the input message
-    gxf_result_t stream_handler_result
-        = cuda_stream_handler_.from_message(context.context(), entity);
-    if (stream_handler_result != GXF_SUCCESS) {
-        throw std::runtime_error(fmt::format("Failed to get the CUDA stream from incoming messages: {}", GxfResultStr(stream_handler_result)));
-    }
 
     const auto maybe_tensor = entity.get<nvidia::gxf::Tensor>();
     if (!maybe_tensor) {
@@ -137,11 +129,16 @@ void ComputeCrcOp::compute(holoscan::InputContext& input, holoscan::OutputContex
             fmt::format("Unsupported storage type {}", (int)input_tensor->storage_type()));
     }
 
+    // Get the CUDA stream from the input message if present, otherwise generate one.
+    // This stream will also be transmitted on the output port.
+    const cudaStream_t cuda_stream = input.receive_cuda_stream();
+
     void* message = input_tensor->pointer();
     size_t message_size = input_tensor->size();
-    hololink::core::NvtxTrace::event_u64("ComputeCrcOp", reinterpret_cast<uint64_t>(message));
-    HOLOSCAN_CUDA_CALL(cudaMemcpyAsync(message_dptr_, &message, sizeof(message), cudaMemcpyHostToDevice, stream_));
-    HOLOSCAN_CUDA_CALL(cudaMemcpyAsync(message_size_dptr_, &message_size, sizeof(message_size), cudaMemcpyHostToDevice, stream_));
+    auto message_value = reinterpret_cast<uint64_t>(message);
+    hololink::core::NvtxTrace::event_u64(fmt::format("ComputeCrcOp buffer={:#x}", message_value).c_str(), message_value);
+    HOLOSCAN_CUDA_CALL(cudaMemcpyAsync(message_dptr_, &message, sizeof(message), cudaMemcpyHostToDevice, cuda_stream));
+    HOLOSCAN_CUDA_CALL(cudaMemcpyAsync(message_size_dptr_, &message_size, sizeof(message_size), cudaMemcpyHostToDevice, cuda_stream));
     uint32_t num_chunks = 1;
 
     // nvcomp 5.0 API: pass options by value, add segment_kind and device_statuses parameters
@@ -153,19 +150,21 @@ void ComputeCrcOp::compute(holoscan::InputContext& input, holoscan::OutputContex
         crc_opts_, // opts (by value, not pointer)
         nvcompCRC32OnlySegment, // segment_kind (complete message, not streaming)
         nullptr, // device_statuses (optional)
-        stream_); // stream
+        cuda_stream); // stream
     if (r != nvcompSuccess) {
         throw std::runtime_error(fmt::format("nvcompBatchedCRC32Async returned {}.", static_cast<int>(r)));
     }
-    HOLOSCAN_CUDA_CALL(cudaMemcpyAsync(&computed_crc_, result_dptr_, sizeof(computed_crc_), cudaMemcpyDeviceToHost, stream_));
+    HOLOSCAN_CUDA_CALL(cudaMemcpyAsync(&computed_crc_, result_dptr_, sizeof(computed_crc_), cudaMemcpyDeviceToHost, cuda_stream));
+    HOLOSCAN_CUDA_CALL(cudaEventRecord(event_, cuda_stream));
+
     // Emit the input tensor
-    output.emit(maybe_entity.value(), "output");
+    output.emit(entity, "output");
 }
 
 uint32_t ComputeCrcOp::get_computed_crc()
 {
-    HOLOSCAN_CUDA_CALL(cudaStreamSynchronize(stream_));
-    hololink::core::NvtxTrace::event_u64("Done", computed_crc_);
+    HOLOSCAN_CUDA_CALL(cudaEventSynchronize(event_));
+    hololink::core::NvtxTrace::event_u64(fmt::format("ComputeCrcOp computed_crc={:#x}", computed_crc_).c_str(), computed_crc_);
     // Using CRC-32/JAMCRC preset which returns bit-inverted CRC32.
     // This directly matches what the FPGA sends (JAMCRC format).
     return computed_crc_;
@@ -184,7 +183,6 @@ void CheckCrcOp::setup(holoscan::OperatorSpec& spec)
         "Operator that computed the CRC");
     spec.param(computed_crc_metadata_name_, "computed_crc_metadata_name", "ComputedCrcMetadataName",
         "When specified, we'll save the computed CRC under this name.", std::string("computed_crc"));
-    cuda_stream_handler_.define_params(spec);
 }
 
 void CheckCrcOp::compute(holoscan::InputContext& op_input, holoscan::OutputContext& op_output,
@@ -195,12 +193,6 @@ void CheckCrcOp::compute(holoscan::InputContext& op_input, holoscan::OutputConte
         throw std::runtime_error("Failed to receive input");
     }
     auto& entity = static_cast<nvidia::gxf::Entity&>(maybe_entity.value());
-
-    gxf_result_t stream_handler_result
-        = cuda_stream_handler_.from_message(context.context(), entity);
-    if (stream_handler_result != GXF_SUCCESS) {
-        throw std::runtime_error(fmt::format("Failed to get the CUDA stream from incoming messages: {}", GxfResultStr(stream_handler_result)));
-    }
 
     //
     std::shared_ptr<ComputeCrcOp> compute_crc_op = compute_crc_op_.get();

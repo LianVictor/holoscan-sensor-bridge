@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: Copyright (c) 2024 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  * SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -23,6 +23,8 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+
+#include "../operator_util.hpp"
 
 #include <holoscan/core/fragment.hpp>
 #include <holoscan/core/operator.hpp>
@@ -61,6 +63,7 @@ public:
 
     // Define a constructor that fully initializes the object.
     PyArgusIspOp(holoscan::Fragment* fragment,
+        const py::args& args,
         int bayer_format,
         float exposure_time_ms,
         float analog_gain,
@@ -77,6 +80,7 @@ public:
             holoscan::Arg { "out_tensor_name", out_tensor_name },
             holoscan::Arg { "camera_index", camera_index } })
     {
+        add_positional_condition_and_resource_args(this, args);
         name_ = name;
         fragment_ = fragment;
         spec_ = std::make_shared<holoscan::OperatorSpec>(fragment);
@@ -95,6 +99,7 @@ PYBIND11_MODULE(_argus_isp, m)
     auto op = py::class_<ArgusIspOp, PyArgusIspOp, holoscan::Operator, std::shared_ptr<ArgusIspOp>>(m,
         "ArgusIspOp")
                   .def(py::init<holoscan::Fragment*,
+                           const py::args&,
                            int,
                            float,
                            float,
@@ -123,4 +128,4 @@ PYBIND11_MODULE(_argus_isp, m)
 
 } // PYBIND11_MODULE
 
-} // namespace holoscan::operators
+} // namespace hololink::operators

@@ -17,7 +17,13 @@
 
 include(pybind11_add_hololink_module)
 
-set(EMULATION_SOURCE_DIR ${CMAKE_SOURCE_DIR}/src/hololink/emulation/python/hololink/emulation)
+copy_hololink_python_files(
+    TARGET_NAME copy_hololink_emulation_python_files
+    DESTINATION emulation
+    FILES __init__.py
+)
+
+set(EMULATION_SOURCE_DIR ${hololink_SOURCE_DIR}/src/hololink/emulation/python/hololink/emulation)
 
 pybind11_add_hololink_module(
     CPP_CMAKE_TARGET emulation

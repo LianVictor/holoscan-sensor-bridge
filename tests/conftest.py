@@ -39,10 +39,10 @@ if False:
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self._socket.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
             self._socket.bind((sender_ip, 0))
-            self._socket.connect((destination_ip, 514))
+            self._destination = (destination_ip, 514)
 
         def write(self, msg):
-            self._socket.send(msg.encode())
+            self._socket.sendto(msg.encode(), self._destination)
 
     udp_writer = UdpWriter(sender_ip="127.0.0.1", destination_ip="127.0.0.1")
     handler = logging.StreamHandler(stream=udp_writer)
@@ -85,6 +85,16 @@ def _hololink_session_finalizer():
 @pytest.fixture(scope="function", autouse=True)
 def hololink_session(request):
     request.addfinalizer(_hololink_session_finalizer)
+
+
+def _reactor_session_finalizer():
+    reactor = hololink_module.Reactor.get_reactor()
+    reactor.reset_framework()
+
+
+@pytest.fixture(scope="function", autouse=True)
+def reactor_session(request):
+    request.addfinalizer(_reactor_session_finalizer)
 
 
 # Produce a default list of COE interfaces.  For now
@@ -242,6 +252,18 @@ def pytest_addoption(parser):
         help="Include tests for Audio.",
     )
     parser.addoption(
+        "--pva",
+        action="store_true",
+        default=False,
+        help="Include tests for PVA CRC hardware (requires PVA SDK).",
+    )
+    parser.addoption(
+        "--fusa",
+        action="store_true",
+        default=False,
+        help="Include tests for FUSA.",
+    )
+    parser.addoption(
         "--emulator",
         action="store_true",
         default=False,
@@ -266,7 +288,8 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "skip_unless_imx274" in item.keywords:
                 item.add_marker(skip_imx274)
-    if config.getoption("--unaccelerated-only"):
+    infiniband_interfaces = hololink_module.infiniband_devices()
+    if config.getoption("--unaccelerated-only") or (not infiniband_interfaces):
         skip_accelerated_networking = pytest.mark.skip(
             reason="Don't run network accelerated tests when --unaccelerated-only is specified."
         )
@@ -350,6 +373,18 @@ def pytest_collection_modifyitems(config, items):
         for item in items:
             if "skip_unless_audio" in item.keywords:
                 item.add_marker(skip_audio)
+    if not config.getoption("--pva"):
+        skip_pva = pytest.mark.skip(
+            reason="Tests only run in --pva mode (requires PVA SDK and hardware)."
+        )
+        for item in items:
+            if "skip_unless_pva" in item.keywords:
+                item.add_marker(skip_pva)
+    if not config.getoption("--fusa"):
+        skip_fusa = pytest.mark.skip(reason="Tests only run in --fusa mode.")
+        for item in items:
+            if "skip_unless_fusa" in item.keywords:
+                item.add_marker(skip_fusa)
 
 
 @pytest.fixture
@@ -505,3 +540,9 @@ def pytest_generate_tests(metafunc):
     if "scheduler" in metafunc.fixturenames:
         schedulers = metafunc.config.getoption("--schedulers")
         metafunc.parametrize("scheduler", schedulers)
+
+
+@pytest.fixture(autouse=True)
+def report_test_name(request):
+    test_name = request.node.name
+    hololink_module.hsb_log_info(f"Starting {test_name}")

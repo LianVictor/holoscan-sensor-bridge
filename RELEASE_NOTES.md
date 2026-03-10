@@ -1,5 +1,46 @@
 # Release Notes
 
+## 2.6-EA, March 2026
+
+### Dependencies
+
+- IGX: [IGX-SW 1.1.2 Production Release](https://developer.nvidia.com/igx-downloads)
+- AGX: Use [SDK Manager](https://developer.nvidia.com/sdk-manager) to set up JetPack
+  6.2.1.
+- Thor: Use [SDK Manager](https://developer.nvidia.com/sdk-manager) to set up JetPack
+  7.1.
+- Holoscan Sensor Bridge, 10G; FPGA v2603.
+
+Be sure and follow the installation instructions included with the release, including
+PTP configuration and HSB device firmware updates. To generate documentation, in the
+host system, run `sh docs/make_docs.sh`, then use your browser to look at
+`docs/user_guide/_build/html/index.html`.
+
+### Updates from 2.5-GA
+
+- **HSDK 3.11** HSB is updated to support running under HSDK 3.11.
+- **Thor and JetPack 7.1** Support for receive-only RDMA on AGX Thor units (with mgbe
+  NICs) is provided.
+- **ComputeCrcOp** and **CheckCrcOp** use [nvCOMP](https://developer.nvidia.com/nvcomp)
+  to compute the CRC-32 of the received data frame. This CRC can be compared against the
+  CRC sent by the FPGA (available in pipeline metadata) to ensure the local data frame
+  has the same content as was received by the FPGA. See
+  `examples/imx274_frame_validation.py` for an example.
+- **ComputePvaCrcOp** and **CheckPvaCrcOp** use
+  [PVA](https://developer.nvidia.com/embedded/pva) to calculate the CRC in the same
+  manner as ComputeCrcOp, with an implementation that uses PVA instead of GPU. This is
+  only supported for systems that include PVA. See
+  `examples/imx274_pva_crc_validation.py` for details.
+- **Sub frame processing** Examples include support for video applications that can
+  begin ISP on parts of the received image, allowing pipelining of video processing with
+  receipt of data.
+- **UART support** Some HSB units include a UART block; APIs are added for control. See
+  `examples/uart_dual_board_loopback.py` for details.
+- **HSB Emulator** Code allowing STM32F767ZI to emulate the HSB IP block is provided,
+  and is intended to be portable across other environments.
+
+And many more minor updates.
+
 ## 2.5-GA, December 2025
 
 ### Dependencies

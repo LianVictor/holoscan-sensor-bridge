@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2024-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2024-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -25,6 +25,11 @@ option(HOLOLINK_BUILD_ARGUS_ISP "Build Argus ISP support" OFF)
 option(HOLOLINK_BUILD_SIPL "Build NvSIPL capture components" OFF)
 option(HOLOLINK_BUILD_EMULATOR "Build HSB Emulator components" ON)
 option(HOLOLINK_BUILD_FUSA "Build NvFusa capture components" OFF)
+option(HOLOLINK_BUILD_PVA "Build PVA CRC components" OFF)
+option(HOLOLINK_BUILD_CPACK "Build DEB package" OFF)
+option(HOLOLINK_BUILD_EXPORT "Install Hololink targets" ON)
+option(HOLOLINK_BUILD_ROCE "Build Hololink with RoCE support" ON)
+option(HOLOLINK_BUILD_SOCKET "Build Hololink with Linux Socket support" ON)
 
 if (HOLOLINK_BUILD_PYTHON AND NOT HOLOLINK_BUILD_EMULATOR)
   message(FATAL_ERROR "If building Python bindings, HOLOLINK_BUILD_EMULATOR must be ON")
@@ -44,14 +49,16 @@ project(hololink
   VERSION ${HOLOLINK_VERSION_NUM})
 
 # To discover our custom CMake modules
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_SOURCE_DIR}/cmake)
+list(APPEND CMAKE_MODULE_PATH ${hololink_SOURCE_DIR}/cmake)
 
 # Find globally required dependencies
 include(hololink_deps/fmt)
 
 if (NOT HOLOLINK_BUILD_ONLY_NATIVE)
-  # Find Holoscan
-  find_package(holoscan 3.6 REQUIRED CONFIG PATHS "/opt/nvidia/holoscan")
+  # Find Holoscan if it is not already defined for source build with FetchContent
+  if(NOT holoscan_SOURCE_DIR)
+    find_package(holoscan 3.6 REQUIRED CONFIG PATHS "/opt/nvidia/holoscan")
+  endif()
 
   # enabled trace and debug log messages in debug build only
   if(CMAKE_BUILD_TYPE STREQUAL "Release")
@@ -81,6 +88,7 @@ if(HOLOLINK_BUILD_EXAMPLES)
 endif()
 if(NOT HOLOLINK_BUILD_ONLY_NATIVE)
   if(HOLOLINK_BUILD_TESTS)
+    enable_testing()
     add_subdirectory(tests)
   endif()
   if(HOLOLINK_BUILD_PYTHON)
@@ -90,7 +98,11 @@ add_subdirectory(scripts)
 endif()
 
 # Add packaging
-include(cmake/HololinkCPack.cmake)
+if(HOLOLINK_BUILD_CPACK)
+  include(cmake/HololinkCPack.cmake)
+endif()
 
 # Add export
-include(cmake/HololinkExport.cmake)
+if(HOLOLINK_BUILD_EXPORT)
+  include(cmake/HololinkExport.cmake)
+endif()

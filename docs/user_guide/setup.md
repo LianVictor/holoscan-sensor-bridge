@@ -470,11 +470,11 @@ which is the RJ45 connector on the AGX Orin.
 
   **This step requires a system reboot to take effect.**
 
-- Install Holoscan SDK v3.9.0:
+- Install Holoscan SDK v3.11.0:
 
   ```none
   sudo apt update
-  sudo apt install -t r38.4 holoscan=3.9.0-2
+  sudo apt install holoscan-cuda-13=3.11.0*
   ```
 
 - Install other Holoscan sensor bridge dependencies:
@@ -492,13 +492,11 @@ which is the RJ45 connector on the AGX Orin.
   sudo dpkg -i cuda-keyring_1.1-1_all.deb
   sudo apt-get update
   rm cuda-keyring_1.1-1_all.deb
-  PINNED_NVCOMP=5.0.0.6-1
-  sudo apt install -y git-lfs cmake libfmt-dev libssl-dev libcurlpp-dev libyaml-cpp-dev libibverbs-dev python3-dev \
-        libnvcomp5-cuda-13=${PINNED_NVCOMP} \
-        libnvcomp5-dev-cuda-13=${PINNED_NVCOMP} \
-        libnvcomp5-static-cuda-13=${PINNED_NVCOMP} \
-        nvcomp-cuda-13=${PINNED_NVCOMP}
-  sudo apt-mark hold libnvcomp5-cuda-13 libnvcomp5-dev-cuda-13 libnvcomp5-static-cuda-13 nvcomp-cuda-13
+  sudo apt install -y git-lfs cmake libfmt-dev libssl-dev libcurlpp-dev libyaml-cpp-dev python3-dev \
+        libnvcomp5-cuda-13 \
+        libnvcomp5-dev-cuda-13 \
+        libnvcomp5-static-cuda-13 \
+        nvcomp-cuda-13
   ```
 
 - Enable the network interface and ensure that the camera enumerates (assumes camera IP address 192.168.0.2):
@@ -528,7 +526,7 @@ which is the RJ45 connector on the AGX Orin.
   ```none
   cd holoscan-sensor-bridge
   mkdir build && cd build
-  cmake -DHOLOLINK_BUILD_SIPL=1 -DHOLOLINK_BUILD_FUSA=1 ..
+  cmake -DHOLOLINK_BUILD_SIPL=1 -DHOLOLINK_BUILD_FUSA=1 -DHOLOLINK_BUILD_ROCE=0 ..
   make -j
   ```
 

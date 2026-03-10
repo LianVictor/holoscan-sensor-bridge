@@ -43,6 +43,19 @@ if(FMT_INCLUDE_DIR)
     INTERFACE_INCLUDE_DIRECTORIES "${FMT_INCLUDE_DIR}"
     INTERFACE_COMPILE_DEFINITIONS "FMT_HEADER_ONLY=1"
   )
+  # to be compatible with HSDK4.0 providing fmt and defining the fmt::fmt target
+  if (NOT TARGET fmt::fmt)
+    find_library(FMT_LIBRARY PATHS ${_fmt_hint_paths}
+      NAMES fmt libfmt
+      PATH_SUFFIXES lib lib64
+      NO_DEFAULT_PATH
+      DOC "Path to fmt library")
+    add_library(fmt::fmt INTERFACE IMPORTED)
+    set_target_properties(fmt::fmt PROPERTIES
+      INTERFACE_INCLUDE_DIRECTORIES "${FMT_INCLUDE_DIR}"
+      INTERFACE_LINK_LIBRARIES "${FMT_LIBRARY}"
+    )
+  endif()
   return()
 endif()
 

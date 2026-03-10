@@ -51,8 +51,7 @@ protected:
      */
     void update_metadata() override;
 
-    // cache for updating the next_page_
-    uint32_t next_page_ { 0 };
+    uint32_t page_ { 0 };
 };
 
 } // namespace hololink::emulation

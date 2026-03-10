@@ -19,6 +19,7 @@
 
 #include <chrono>
 #include <memory>
+#include <optional>
 #include <random>
 #include <string>
 #include <thread>
@@ -51,10 +52,26 @@ static std::string get_device_ip(const std::string& device_name, int ib_port)
     return operators::ibv::gid_to_ipv4(gid);
 }
 
-static operators::ibv::DeviceList device_list;
-static std::string ibv_name = device_list.get(0).name();
-static uint32_t ibv_port = 1;
-static std::string host_ip = get_device_ip(ibv_name, ibv_port);
+struct RoceTestDeviceInfo {
+    std::string ibv_name;
+    uint32_t ibv_port;
+    std::string host_ip;
+};
+
+static std::optional<RoceTestDeviceInfo> get_roce_test_device_info()
+{
+    operators::ibv::DeviceList device_list;
+    if (device_list.size() == 0) {
+        return std::nullopt;
+    }
+    std::string ibv_name = device_list.get(0).name();
+    uint32_t ibv_port = 1;
+    std::string host_ip = get_device_ip(ibv_name, ibv_port);
+    if (host_ip.empty()) {
+        return std::nullopt;
+    }
+    return RoceTestDeviceInfo { ibv_name, ibv_port, host_ip };
+}
 
 using Tensor = std::shared_ptr<holoscan::Tensor>;
 using Data = std::vector<float>;
@@ -216,10 +233,12 @@ private:
 class RoceTransmitterTestApp : public holoscan::Application {
 public:
     RoceTransmitterTestApp(size_t roce_transmitter_buffer_size,
-        const DataGeneratorOp::DataGenerator& data_generator, const RoceReceiver::DataValidator& data_validator)
+        const DataGeneratorOp::DataGenerator& data_generator, const RoceReceiver::DataValidator& data_validator,
+        const RoceTestDeviceInfo& device_info)
         : roce_transmitter_buffer_size_(roce_transmitter_buffer_size)
         , data_generator_(data_generator)
-        , roce_receiver_(data_validator, roce_transmitter_buffer_size_, ibv_name, ibv_port, host_ip)
+        , roce_receiver_(data_validator, roce_transmitter_buffer_size_, device_info.ibv_name, device_info.ibv_port, device_info.host_ip)
+        , device_info_(device_info)
     {
     }
 
@@ -231,9 +250,9 @@ public:
             holoscan::Arg("data_generator", data_generator_));
         roce_transmitter_op_ = make_operator<hololink::operators::RoceTransmitterOp>(
             "Roce Transmitter",
-            holoscan::Arg("ibv_name", ibv_name.c_str()),
-            holoscan::Arg("ibv_port", ibv_port),
-            holoscan::Arg("hololink_ip", host_ip.c_str()),
+            holoscan::Arg("ibv_name", device_info_.ibv_name.c_str()),
+            holoscan::Arg("ibv_port", device_info_.ibv_port),
+            holoscan::Arg("hololink_ip", device_info_.host_ip.c_str()),
             holoscan::Arg("ibv_qp", roce_receiver_.get_qp_num()),
             holoscan::Arg("buffer_size", roce_transmitter_buffer_size_),
             holoscan::Arg("queue_size", static_cast<uint64_t>(1)),
@@ -257,6 +276,7 @@ private:
     size_t roce_transmitter_buffer_size_;
     const DataGeneratorOp::DataGenerator& data_generator_;
     RoceReceiver roce_receiver_;
+    RoceTestDeviceInfo device_info_;
 
     std::shared_ptr<DataGeneratorOp> data_generator_op_;
     std::shared_ptr<hololink::operators::RoceTransmitterOp> roce_transmitter_op_;
@@ -274,6 +294,10 @@ static Data generate_data(size_t size)
 
 TEST(RoceTransmitterTest, float_8)
 {
+    auto device_info = get_roce_test_device_info();
+    if (!device_info) {
+        GTEST_SKIP() << "No RoCE-capable InfiniBand device available";
+    }
     Data d(generate_data(8));
     RoceTransmitterTestApp app(
         d.size() * sizeof(Data::value_type),
@@ -282,12 +306,17 @@ TEST(RoceTransmitterTest, float_8)
         }),
         RoceReceiver::DataValidator([&d](const Data& data) {
             EXPECT_TRUE(std::equal(d.begin(), d.begin() + d.size(), data.begin()));
-        }));
+        }),
+        *device_info);
     app.run();
 }
 
 TEST(RoceTransmitterTest, float_4K)
 {
+    auto device_info = get_roce_test_device_info();
+    if (!device_info) {
+        GTEST_SKIP() << "No RoCE-capable InfiniBand device available";
+    }
     Data d(generate_data(4 * 1024));
     RoceTransmitterTestApp app(
         d.size() * sizeof(Data::value_type),
@@ -296,12 +325,17 @@ TEST(RoceTransmitterTest, float_4K)
         }),
         RoceReceiver::DataValidator([&d](const Data& data) {
             EXPECT_TRUE(std::equal(d.begin(), d.begin() + d.size(), data.begin()));
-        }));
+        }),
+        *device_info);
     app.run();
 }
 
 TEST(RoceTransmitterTest, float_1M)
 {
+    auto device_info = get_roce_test_device_info();
+    if (!device_info) {
+        GTEST_SKIP() << "No RoCE-capable InfiniBand device available";
+    }
     Data d(generate_data(4 * 1024));
     RoceTransmitterTestApp app(
         d.size() * sizeof(Data::value_type),
@@ -310,7 +344,8 @@ TEST(RoceTransmitterTest, float_1M)
         }),
         RoceReceiver::DataValidator([&d](const Data& data) {
             EXPECT_TRUE(std::equal(d.begin(), d.begin() + d.size(), data.begin()));
-        }));
+        }),
+        *device_info);
     app.run();
 }
 

@@ -1,5 +1,5 @@
 /**
- * SPDX-FileCopyrightText: Copyright (c) 2025 NVIDIA CORPORATION & AFFILIATES.
+ * SPDX-FileCopyrightText: Copyright (c) 2025-2026 NVIDIA CORPORATION & AFFILIATES.
  * All rights reserved. SPDX-License-Identifier: Apache-2.0
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
@@ -342,7 +342,7 @@ void LinuxCoeReceiver::signal()
     frame_ready_(this[0]);
 }
 
-bool LinuxCoeReceiver::get_next_frame(unsigned timeout_ms, LinuxCoeReceiverMetadata& metadata)
+bool LinuxCoeReceiver::get_next_frame(unsigned timeout_ms, LinuxCoeReceiverMetadata& metadata, CUstream cuda_stream)
 {
     bool r = wait(timeout_ms);
     if (r) {
@@ -374,6 +374,11 @@ bool LinuxCoeReceiver::get_next_frame(unsigned timeout_ms, LinuxCoeReceiverMetad
         }
     }
     return r;
+}
+
+bool LinuxCoeReceiver::frames_ready()
+{
+    return ready_;
 }
 
 bool LinuxCoeReceiver::wait(unsigned timeout_ms)

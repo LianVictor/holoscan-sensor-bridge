@@ -13,6 +13,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+find_package(CUDAToolkit REQUIRED)
+
 add_library(hololink_core STATIC
   arp_wrapper.cpp
   data_channel.cpp
@@ -34,6 +36,7 @@ set_property(TARGET hololink_core PROPERTY POSITION_INDEPENDENT_CODE ON)
 
 target_link_libraries(hololink_core
   PUBLIC
+    CUDA::cuda_driver
     fmt::fmt-header-only
 )
 
@@ -66,6 +69,7 @@ install(FILES
         networking.hpp
         nullable_pointer.hpp
         nvtx_trace.hpp
+        packetizer_program.hpp
         reactor.hpp
         serializer.hpp
         smart_object_pool.hpp

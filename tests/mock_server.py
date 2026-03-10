@@ -1,4 +1,4 @@
-# SPDX-FileCopyrightText: Copyright (c) 2023-2025 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
+# SPDX-FileCopyrightText: Copyright (c) 2023-2026 NVIDIA CORPORATION & AFFILIATES. All rights reserved.
 # SPDX-License-Identifier: Apache-2.0
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -17,9 +17,7 @@
 
 import argparse
 import collections
-import ctypes
 import logging
-import multiprocessing
 import os
 import queue
 import select
@@ -41,9 +39,10 @@ import hololink as hololink_module
 # should be allocated?  We'll fault if we try to create an
 # image that won't fit.  A 4k image is like 32M.
 image_size_limit = 64 * 1024 * 1024
-image_memory = multiprocessing.Array(ctypes.c_uint8, image_size_limit)
+image_memory = bytearray(image_size_limit)
 # total-size, height, width, bpp
-image_memory_metadata = multiprocessing.Array(ctypes.c_uint32, [0, 0, 0, 0])
+image_memory_metadata = [0, 0, 0, 0]
+image_memory_lock = threading.Lock()
 
 DataPlaneConfiguration = collections.namedtuple(
     "DataPlaneConfiguration", ["hif_address"]
@@ -74,6 +73,8 @@ NS_PER_SEC = 1000 * US_PER_SEC
 
 icrc_initializer = zlib.crc32(bytes([0xFF] * 8))
 
+SEQUENCER_SHUTDOWN = "sequencer shutdown"
+
 
 def generate_image(bayer_height, bayer_width, bayer_format, pixel_format):
     image, bayer_image = utils.make_image(
@@ -82,12 +83,11 @@ def generate_image(bayer_height, bayer_width, bayer_format, pixel_format):
     logging.debug("bayer_image=%s bytes" % (bayer_image.nbytes,))
     # Publish our image so that test code can check that
     # we decoded to the same thing.
-    global image_memory, image_memory_metadata
-    with image_memory.get_lock():
-        s = image.ravel()
-        length = len(s)
-        u = np.frombuffer(image_memory.get_obj(), dtype=np.uint8, count=length)
-        np.copyto(u, s)
+    global image_memory, image_memory_metadata, image_memory_lock
+    s = image.ravel()
+    length = len(s)
+    with image_memory_lock:
+        image_memory[:length] = s.tobytes()
         image_memory_metadata[0] = length
         image_memory_metadata[1] = image.shape[0]
         image_memory_metadata[2] = image.shape[1]
@@ -333,7 +333,7 @@ class MockServer:
         self._camera_watchdog_trigger = 0
         self._frame_time_s = 1.0
         self._camera_version = 12344312
-        self._hsb_ip_version = 0x2504
+        self._hsb_ip_version = 0x2602
         self._fpga_date = 20250528
         self._serial_number = 0xAA55
         self._memory = {
@@ -348,12 +348,11 @@ class MockServer:
         self._vp_address = sensor_map[self._sensor].vp_address
         self._memory[self._vp_address + hololink_module.DP_QP] = 0
         self._memory[self._vp_address + hololink_module.DP_RKEY] = 0
-        self._memory[self._vp_address + hololink_module.DP_ADDRESS_0] = 0
-        self._memory[self._vp_address + hololink_module.DP_ADDRESS_1] = 0
-        self._memory[self._vp_address + hololink_module.DP_ADDRESS_2] = 0
-        self._memory[self._vp_address + hololink_module.DP_ADDRESS_3] = 0
+        self._memory[self._vp_address + hololink_module.DP_MAX_BUFF] = 0
+        self._memory[self._vp_address + hololink_module.DP_PAGE_LSB] = 0
+        self._memory[self._vp_address + hololink_module.DP_PAGE_MSB] = 0
+        self._memory[self._vp_address + hololink_module.DP_PAGE_INC] = 0
         self._memory[self._vp_address + hololink_module.DP_BUFFER_LENGTH] = 0
-        self._memory[self._vp_address + hololink_module.DP_BUFFER_MASK] = 0
         self._memory[self._vp_address + hololink_module.DP_HOST_MAC_LOW] = 0
         self._memory[self._vp_address + hololink_module.DP_HOST_MAC_HIGH] = 0
         self._memory[self._vp_address + hololink_module.DP_HOST_IP] = 0
@@ -374,7 +373,6 @@ class MockServer:
         self._sequencer = threading.Thread(target=self.run_sequencer, daemon=True)
 
     def udp_server(self, lock):
-        #
         logging.debug("Starting.")
         self._sequencer.start()
         control_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
@@ -386,8 +384,8 @@ class MockServer:
         message = bytearray(hololink_module.UDP_PACKET_SIZE)
         reply = bytearray(1500)
         frame_number = 0
-        next_page = 0
         latched_sequence = 0
+        page = 0
 
         now = time.monotonic()
         # frames come in at this rate.
@@ -496,17 +494,17 @@ class MockServer:
                         if self._run:
                             timestamp = time.time_ns()
                             # Advance "page", which tells us the host address we're going to write to
-                            page_mask = self.memory_read(
-                                self._vp_address + hololink_module.DP_BUFFER_MASK
+                            dp_max_buff = self.memory_read(
+                                self._vp_address + hololink_module.DP_MAX_BUFF
                             )
-                            for i in range(32):
-                                page = next_page
-                                next_page = (next_page + 1) % 32
-                                if (page_mask & (1 << page)) == 1:
-                                    break
+                            start_page = (dp_max_buff >> 16) & 0xFFF
+                            end_page = (dp_max_buff >> 0) & 0xFFF
+                            if page < start_page:
+                                page = start_page
                             else:
-                                logging.error("Page mask is 0; skipping this frame.")
-                                continue
+                                page += 1
+                            if page > end_page:
+                                page = start_page
                             frame_number += 1
                             logging.debug("frame_number=%s" % (frame_number,))
                             #
@@ -535,16 +533,17 @@ class MockServer:
                                 * PAGE_SIZE
                             )
                             assert payload_size > 0
-                            address_map = {
-                                0: hololink_module.DP_ADDRESS_0,
-                                1: hololink_module.DP_ADDRESS_1,
-                                2: hololink_module.DP_ADDRESS_2,
-                                3: hololink_module.DP_ADDRESS_3,
-                            }
-                            address = self.memory_read(
-                                self._vp_address + address_map[page]
+                            address_lsb = self.memory_read(
+                                self._vp_address + hololink_module.DP_PAGE_LSB
                             )
-                            address <<= 7
+                            address_msb = self.memory_read(
+                                self._vp_address + hololink_module.DP_PAGE_MSB
+                            )
+                            page_inc = self.memory_read(
+                                self._vp_address + hololink_module.DP_PAGE_INC
+                            )
+                            address = (address_msb << 32) | address_lsb
+                            address += page_inc * PAGE_SIZE * page
                             qp = self.memory_read(
                                 self._vp_address + hololink_module.DP_QP
                             )
@@ -580,9 +579,9 @@ class MockServer:
                                     data_socket.sendto(packet, (ip, target_udp_port))
                                     s, e = e, e + payload_size
                                     self._psn += 1
-                                assert (page & ~0xFF) == 0
-                                immediate_value = (page & 0xFF) | (
-                                    (self._psn & 0xFFFFFF) << 8
+                                assert (page & ~0xFFF) == 0
+                                immediate_value = (page & 0xFFF) | (
+                                    (self._psn & 0xFFFFF) << 12
                                 )
                                 overall_crc = (
                                     0  # We'll add this when we watermark checking demos
@@ -604,6 +603,13 @@ class MockServer:
                                     metadata_s,
                                     metadata_ns,
                                 )
+                                # Zero-extend metadata to METADATA_SIZE
+                                metadata_size = len(metadata)
+                                if metadata_size < hololink_module.METADATA_SIZE:
+                                    metadata += bytes(
+                                        hololink_module.METADATA_SIZE - metadata_size
+                                    )
+                                assert len(metadata) == hololink_module.METADATA_SIZE
                                 frame_size = self.memory_read(
                                     self._vp_address + hololink_module.DP_BUFFER_LENGTH
                                 )
@@ -621,6 +627,10 @@ class MockServer:
                                     metadata_packet, (ip, target_udp_port)
                                 )
                                 self._psn += 1
+        # Even though this thread is daemon, don't leave it
+        # dangling.
+        self._sequencer_queue.put(SEQUENCER_SHUTDOWN)
+        self._sequencer.join()
 
     def memory_write(self, address, value):
         logging.debug("Writing 0x%X to 0x%X." % (value, address))
@@ -693,6 +703,8 @@ class MockServer:
         while True:
             event = self._sequencer_queue.get()
             logging.debug(f"{event=}")
+            if event is SEQUENCER_SHUTDOWN:
+                break
             # Run it.
             vector = hololink_module.APB_RAM + int(event) * 4
             instruction_pointer = self.memory_read(vector)
@@ -757,20 +769,20 @@ class TestServer:
     def __init__(self, mock_camera=None):
         """If mock_camera is None, then we'll start one and use that."""
         self._mock_camera = mock_camera
-        self._process = None
-        self._lock = multiprocessing.Lock()
+        self._thread = None
+        self._lock = threading.Lock()
         self._server = MockServer()
 
     def __enter__(self):
         logging.debug("__enter__")
         if self._mock_camera is None:
             self._lock.acquire()
-            self._process = multiprocessing.Process(
+            self._thread = threading.Thread(
                 target=self._run,
                 name="udp-server",
             )
-            self._process.start()
             self._server_address = "127.0.0.1"
+            self._thread.start()
             self._lock.acquire()
         else:
             self._server_address = self._mock_camera
@@ -779,9 +791,9 @@ class TestServer:
 
     def __exit__(self, *args, **kwargs):
         logging.debug("__exit__")
-        if self._process is not None:
+        if self._thread is not None:
             self._server.close()
-            self._process.join()
+            self._thread.join()
 
     def _run(self):
         try:
@@ -800,14 +812,14 @@ class TestServer:
 
     def get_image(self):
         logging.debug("Fetching image.")
-        global image_memory, image_memory_metadata
-        with image_memory.get_lock():
+        global image_memory, image_memory_metadata, image_memory_lock
+        with image_memory_lock:
             length, height, width, bpp = image_memory_metadata[0:4]
             logging.debug(
                 "length=%s height=%s width=%s bpp=%s" % (length, height, width, bpp)
             )
-            u = np.frombuffer(image_memory.get_obj(), dtype=np.uint8, count=length)
-            r = np.array(u).reshape(height, width, bpp)
+            u = np.frombuffer(image_memory, dtype=np.uint8, count=length)
+            r = np.array(u, copy=True).reshape(height, width, bpp)
         return r
 
     def channel_metadata(self):
@@ -834,7 +846,7 @@ def main():
     args = parser.parse_args()
     hololink_module.logging_level(args.log_level)
     # provide it a dummy lock; no one else is running to synchronize with this.
-    lock = multiprocessing.Lock()
+    lock = threading.Lock()
     lock.acquire()
     server = MockServer()
     server.udp_server(lock)
