@@ -84,6 +84,15 @@ then
     echo "Warning: Cannot determine product name from DMI. This system/configuration may not be supported."
 fi
 
+# compiles a minimal binary as CUDA program verbosely to detect the native architecture used for the available GPU(s) and captures it in output
+# this will be passed to docker container environment to be available to cmake both during container build and HSB rebuilds for targets that have architecture dependencies, e.g. gpu_roce_transceiver
+CUDA_NATIVE_ARCH=$(echo -n "int main(void) {return 0; }" | /usr/local/cuda/bin/nvcc -arch=native --verbose -x cu -o /tmp/main - 2>&1 | grep -m 1 -oE "__CUDA_ARCH__=[^-]+" | cut -d= -f2 | tr -d ' ')
+if [ -z "$CUDA_NATIVE_ARCH" ]; then
+    CUDA_NATIVE_ARCH=800
+fi
+# The result above will be for example 890 for compute 8.9. Remove the trailing digit
+CUDA_NATIVE_ARCH="${CUDA_NATIVE_ARCH%?}"
+
 # Do a bit of environment checking:
 # If we're running 'connmand' (e.g. IGX deployment)
 # and veth isn't in the blacklist file, then
@@ -223,8 +232,6 @@ then
     fi
 fi
 
-
-
 # For Jetson Nano devices, which have very limited memory,
 # limit the number of CPUs so we don't run out of RAM.
 INSTALL_ENVIRONMENT=""
@@ -234,15 +241,6 @@ then
 INSTALL_ENVIRONMENT="taskset -c 0-2"
 fi
 
-# Detect GPU archs on the host and pass to Docker (nvidia-smi cannot run inside the
-# container during build). User can override with CUDA_ARCHS="90 100" ./build.sh ...
-if [ -z "${CUDA_ARCHS:-}" ] && command -v nvidia-smi >/dev/null 2>&1; then
-    CUDA_ARCHS="$(nvidia-smi --query-gpu=compute_cap --format=csv,noheader \
-        | tr -d '.' | sort -u)"
-fi
-# CMake CUDAARCHS (set in Dockerfile) expects semicolon-separated list
-CUDA_ARCHS="$(echo "${CUDA_ARCHS:-}" | tr ' ' ';')"
-
 # temporarily disable tracing to output configuration variables
 set +x
 echo "PRODUCT_NAME: $PRODUCT_NAME"
@@ -251,6 +249,7 @@ echo "CONTAINER_TYPE: $CONTAINER_TYPE"
 echo "PROTOTYPE_OPTIONS: $PROTOTYPE_OPTIONS"
 echo "INSTALL_ENVIRONMENT: $INSTALL_ENVIRONMENT"
 echo "L4T_VERSION: $L4T_VERSION"
+echo "CUDA_NATIVE_ARCH: $CUDA_NATIVE_ARCH"
 set -x
 
 # Build the development container.  We specifically rely on buildkit skipping
@@ -261,7 +260,7 @@ DOCKER_BUILDKIT=1 docker build \
     --build-arg "CONTAINER_TYPE=$CONTAINER_TYPE" \
     --build-arg "HSDK_VERSION=$HSDK_VERSION" \
     --build-arg "L4T_VERSION=$L4T_VERSION" \
-    --build-arg "CUDA_ARCHS=$CUDA_ARCHS" \
+    --build-arg "CUDA_NATIVE_ARCH=$CUDA_NATIVE_ARCH" \
     -t hololink-prototype:$VERSION \
     -f $HERE/Dockerfile \
     $PROTOTYPE_OPTIONS \

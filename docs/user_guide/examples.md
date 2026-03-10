@@ -20,6 +20,10 @@ DGX Spark may also be used.
   [SIPL](https://docs.nvidia.com/jetson/archives/r38.4/DeveloperGuide/SD/CameraDevelopment/CoECameraDevelopment/SIPL-for-L4T/Introduction-to-SIPL.html)
   accelerated network receiver operator and require MGBE SmartNIC controller and are
   unique to AGX Thor.
+- For accelerated networking examples on IGX Thor, `CUDA_VISIBLE_DEVICES` environment
+  variable will have to be set to the matching graphics GPU configuration, which
+  defaults to iGPU. For example, if dGPU graphics are configured, `imx274_player` must
+  have `CUDA_VISIBLE_DEVICES` set to `0` or `0,1` to select RDMA to the dGPU.
 
 Most examples have both the accelerated and an unaccelerated Linux Sockets API version.
 

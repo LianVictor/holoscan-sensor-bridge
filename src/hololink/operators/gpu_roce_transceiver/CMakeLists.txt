@@ -30,78 +30,8 @@ pkg_search_module(DOCA_GPUNETIO REQUIRED doca-gpunetio)
 pkg_search_module(DOCA_VERBS REQUIRED doca-verbs)
 
 enable_language(CUDA)
-
-set(LOCAL_CUDA_ARCHS "")
-# Use standard CMAKE_CUDA_ARCHITECTURES when set (e.g. -D from Docker or parent)
-if(DEFINED CMAKE_CUDA_ARCHITECTURES AND NOT CMAKE_CUDA_ARCHITECTURES STREQUAL "")
-  if(CMAKE_CUDA_ARCHITECTURES MATCHES ";")
-    set(LOCAL_CUDA_ARCHS "${CMAKE_CUDA_ARCHITECTURES}")
-  else()
-    separate_arguments(LOCAL_CUDA_ARCHS NATIVE_COMMAND "${CMAKE_CUDA_ARCHITECTURES}")
-  endif()
-else()
-  find_program(NVIDIA_SMI_EXECUTABLE nvidia-smi)
-  if(NVIDIA_SMI_EXECUTABLE)
-    execute_process(
-      COMMAND ${NVIDIA_SMI_EXECUTABLE}
-              --query-gpu=compute_cap
-              --format=csv,noheader
-      RESULT_VARIABLE CUDA_SMI_RESULT
-      OUTPUT_VARIABLE CUDA_CC_LIST_RAW
-      OUTPUT_STRIP_TRAILING_WHITESPACE
-      ERROR_QUIET
-    )
-    if(CUDA_SMI_RESULT EQUAL 0 AND NOT CUDA_CC_LIST_RAW STREQUAL "")
-      separate_arguments(CUDA_CC_LIST NATIVE_COMMAND "${CUDA_CC_LIST_RAW}")
-      foreach(cc IN LISTS CUDA_CC_LIST)
-        string(STRIP "${cc}" cc_stripped)
-        if(cc_stripped STREQUAL "")
-          continue()
-        endif()
-        string(REPLACE "." "" arch_num "${cc_stripped}")
-        list(FIND LOCAL_CUDA_ARCHS "${arch_num}" _idx)
-        if(_idx EQUAL -1)
-          list(APPEND LOCAL_CUDA_ARCHS "${arch_num}")
-        endif()
-      endforeach()
-    endif()
-  endif()
-
-  # Fallback if nvidia-smi not available or returns nothing
-  if(LOCAL_CUDA_ARCHS STREQUAL "")
-    message(WARNING
-            "nvidia-smi not available or no GPU ARCHs passed or reported; "
-            "falling back to fixed candidate architectures."
-    )
-    set(LOCAL_CUDA_ARCHS 80 86 87 90 100 110 120)
-  endif()
-endif()
-
-# Ask nvcc which architectures it supports and intersect with local GPU archs
-execute_process(
-  COMMAND ${CMAKE_CUDA_COMPILER} --list-gpu-arch
-  OUTPUT_VARIABLE CUDA_ARCH_LIST_RAW
-  OUTPUT_STRIP_TRAILING_WHITESPACE
-)
-
-set(SUPPORTED_CUDA_ARCHS "")
-foreach(arch IN LISTS LOCAL_CUDA_ARCHS)
-  string(FIND "${CUDA_ARCH_LIST_RAW}" "compute_${arch}" pos)
-  if(NOT pos EQUAL -1)
-    list(APPEND SUPPORTED_CUDA_ARCHS "${arch}")
-  endif()
-endforeach()
-
-if(SUPPORTED_CUDA_ARCHS STREQUAL "")
-  message(FATAL_ERROR
-          "None of the requested CUDA_ARCHITECTURES (${LOCAL_CUDA_ARCHS}) "
-          "are supported by ${CMAKE_CUDA_COMPILER}. "
-  )
-endif()
-
 # Check if DOCA is available
 message(STATUS "DOCA found at ${DOCA_PATH}")
-message(STATUS "CUDA ARCHS: ${SUPPORTED_CUDA_ARCHS}")
 
 add_library(gpu_roce_transceiver STATIC
   gpu_roce_transceiver_op.cpp
@@ -110,7 +40,43 @@ add_library(gpu_roce_transceiver STATIC
   gpu_roce_transceiver_kernel.cu
 )
 
-set_property(TARGET gpu_roce_transceiver PROPERTY CUDA_ARCHITECTURES ${SUPPORTED_CUDA_ARCHS})
+set(LOCAL_CUDA_ARCHITECTURES "")
+if (DEFINED CMAKE_CUDA_ARCHITECTURES AND NOT CMAKE_CUDA_ARCHITECTURES STREQUAL "")
+  # Keep only architectures >= 80; compare numeric part only (values may be e.g. 80-virtual, 70-real)
+  # architectures < 70 will fail to build/link with doca-gpunetio. doca gpunetio development suggests minimum 80
+  foreach(arch IN LISTS CMAKE_CUDA_ARCHITECTURES)
+    string(REGEX REPLACE "^([0-9]+).*" "\\1" arch_num "${arch}")
+    if(NOT arch_num LESS 80)
+      list(APPEND LOCAL_CUDA_ARCHITECTURES ${arch})
+    else()
+      message(STATUS "gpu_roce_transceiver: ${arch} compute capability not used when building gpu_roce_transceiver. must be at least 80")
+    endif()
+  endforeach()
+endif()
+
+# Default to compute_80 if empty for compatibility across target platforms and doca-gpunetio
+if(LOCAL_CUDA_ARCHITECTURES STREQUAL "")
+  list(APPEND LOCAL_CUDA_ARCHITECTURES 80-virtual)
+  message(STATUS "gpu_roce_transceiver: adding 80-virtual to CUDA_ARCHITECTURES for a minimally compatible build")
+endif()
+
+# If CUDA_NATIVE_ARCH is set, append it to LOCAL_CUDA_ARCHITECTURES; else use -arch=native
+if(NOT "$ENV{CUDA_NATIVE_ARCH}" STREQUAL "")
+  list(APPEND LOCAL_CUDA_ARCHITECTURES "$ENV{CUDA_NATIVE_ARCH}")
+else()
+  # Force native architecture for optimized performance on platform if available
+  # This can actually fail if container nvcc and host driver are different versions
+  # in which case nvcc will default to a significantly older compute capability, which may fail for gpu_roce_transceiver.
+  # if this happens and result is not desired, the build should set CUDA_NATIVE_ARCH in the environment to the desired/native architecture
+  target_compile_options(gpu_roce_transceiver PRIVATE $<$<COMPILE_LANGUAGE:CUDA>:
+    -arch=native
+    >)
+endif()
+message(STATUS "gpu_roce_transceiver: build architectures ${LOCAL_CUDA_ARCHITECTURES} and native")
+set_property(TARGET gpu_roce_transceiver PROPERTY CUDA_ARCHITECTURES ${LOCAL_CUDA_ARCHITECTURES})
+
+# to silence doca api warnings
+target_compile_options(gpu_roce_transceiver PRIVATE -DDOCA_ALLOW_EXPERIMENTAL_API=1)
 
 add_library(hololink::operators::gpu_roce_transceiver ALIAS gpu_roce_transceiver)
 

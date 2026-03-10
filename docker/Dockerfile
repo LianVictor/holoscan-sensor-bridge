@@ -177,7 +177,7 @@ FROM build_${CONTAINER_TYPE}
 # ARGs must be redeclared after FROM to be available in this build stage
 ARG HSDK_VERSION=invalid
 ARG L4T_VERSION=invalid
-ARG CUDA_ARCHS=""
+ARG CUDA_NATIVE_ARCH=invalid
 
 # the python environment is protected in the cuda containers, so enable breaking system packages for all containers
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
@@ -213,13 +213,11 @@ RUN if [ "${TARGETARCH}" = "amd64" ]; then \
         exit 1; \
     fi \
     && apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends wget \
     && UBUNTU_VERSION=$(cat /etc/os-release | grep "VERSION_ID" | awk -F'=' '{print $2}' | sed 's/[."]//g') \
-    && wget https://www.mellanox.com/downloads/DOCA/DOCA_v${DOCA_VERSION}/host/doca-host_${DOCA_VERSION}-088000-26.01-ubuntu${UBUNTU_VERSION}_${DOCA_ARCH}.deb \
+    && curl -fL -O https://www.mellanox.com/downloads/DOCA/DOCA_v${DOCA_VERSION}/host/doca-host_${DOCA_VERSION}-088000-26.01-ubuntu${UBUNTU_VERSION}_${DOCA_ARCH}.deb \
     && apt-get install -o DPkg::Options::="--force-confnew" -y ./doca-host_${DOCA_VERSION}-088000-26.01-ubuntu${UBUNTU_VERSION}_${DOCA_ARCH}.deb \
     && rm -f ./doca-host_${DOCA_VERSION}-088000-26.01-ubuntu${UBUNTU_VERSION}_${DOCA_ARCH}.deb \
-    && apt-get update \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get update
 
 # Set up CMake PPA for CMake 3.31
 RUN ${APT_CACHE_MOUNT} \
@@ -274,13 +272,14 @@ RUN ${APT_CACHE_MOUNT} apt-get update \
     cuda-cudart-dev-${CUDA_VERSION_MAJOR}-${CUDA_VERSION_MINOR} \
     cuda-driver-dev-${CUDA_VERSION_MAJOR}-${CUDA_VERSION_MINOR}
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# install cx-7 and doca dependencies
+RUN ${APT_CACHE_MOUNT} apt-get update \
+    && DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
     pkgconf \
     libdoca-sdk-gpunetio-dev \
     libdoca-sdk-verbs-dev \
     mlnx-ofed-kernel-utils \
-    ibverbs-utils \
-    && rm -rf /var/lib/apt/lists/*
+    ibverbs-utils
 
 # python package dependencies
 # holoscan has a minimum pip version requirement that cannot be satisfied by the debian package
@@ -289,38 +288,40 @@ RUN curl https://bootstrap.pypa.io/get-pip.py -o get-pip.py && python3 get-pip.p
     && python3 -m pip install --upgrade pip \
     && pip3 install meson ninja pyelftools numpy holoscan-cu${CUDA_VERSION_MAJOR}==${HSDK_VERSION}
 
+# Set up CUDA APT repo if missing
+RUN if ! grep -q "developer.download.nvidia.com/compute/cuda/repos" /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null; then \
+        UBUNTU_VERSION=$(cat /etc/os-release | grep "VERSION_ID" | awk -F'=' '{print $2}' | sed 's/[."]//g') \
+        && curl -fL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${UBUNTU_VERSION}/sbsa/cuda-keyring_1.1-1_all.deb -O \
+        && dpkg -i cuda-keyring_1.1-1_all.deb \
+        && rm -f cuda-keyring_1.1-1_all.deb \
+    ; fi
+
 # install holoscan deb. This should happen before installing nvcomp to minimize conflict with compute/cuda/repos
 RUN ${APT_CACHE_MOUNT} \
     apt-get update; \
     if [ -n "$L4T_VERSION" ] && [ "$L4T_VERSION" != "invalid" ] ; then \
         echo "installing holoscan-cuda-${CUDA_VERSION_MAJOR}=${HSDK_VERSION}* for L4T ${L4T_VERSION}" \
         && apt-get install -y -t r${L4T_MAJ_VER}.${L4T_MIN_VER} holoscan-cuda-${CUDA_VERSION_MAJOR}=${HSDK_VERSION}* \
-    ; else \
+    ; fi \
+    ; if ! apt list --installed 2>/dev/null | grep -qi "holoscan-cuda" ; then \
         echo "installing holoscan-cuda-${CUDA_VERSION_MAJOR}=${HSDK_VERSION}* for CUDA ${CUDA_VERSION}" \
         && apt-get install -y holoscan-cuda-${CUDA_VERSION_MAJOR}=${HSDK_VERSION}* \
     ; fi \
     ; if ! apt list --installed 2>/dev/null | grep -qi "holoscan-cuda" ; then \
-        echo "holoscan-cuda-${CUDA_VERSION_MAJOR}=${HSDK_VERSION} not found, using 'holoscan' package"; \
-        DEBIAN_FRONTEND=noninteractive apt-get install -y holoscan=${HSDK_VERSION}*; \
-    fi
+        echo "holoscan-cuda-${CUDA_VERSION_MAJOR}=${HSDK_VERSION} not found, using 'holoscan' package" \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -y holoscan=${HSDK_VERSION}* \
+    ; fi
 RUN echo "/opt/nvidia/holoscan/lib" >> /etc/ld.so.conf.d/holoscan.conf \
     && ldconfig \
     && ldconfig -p | grep -q "libholoscan_core.so" || (echo "holoscan libraries not found" && exit 1)
-
-# Set up CUDA APT repo if missing
-RUN if ! grep -q "developer.download.nvidia.com/compute/cuda/repos" /etc/apt/sources.list /etc/apt/sources.list.d/* 2>/dev/null; then \
-        UBUNTU_VERSION=$(cat /etc/os-release | grep "VERSION_ID" | awk -F'=' '{print $2}' | sed 's/[."]//g') \
-        && curl -L https://developer.download.nvidia.com/compute/cuda/repos/ubuntu${UBUNTU_VERSION}/sbsa/cuda-keyring_1.1-1_all.deb -O \
-        && dpkg -i cuda-keyring_1.1-1_all.deb; \
-    fi
 
 # Install nvCOMP for CRC32 operator 
 RUN ${APT_CACHE_MOUNT} \
     apt-get update \
     && if ! grep -rq "compute/cuda/repos/ubuntu" /etc/apt/sources.list.d/ /etc/apt/sources.list 2>/dev/null; then \
-        curl -O -L https://developer.download.nvidia.com/compute/cuda/repos/ubuntu`lsb_release -rs | cut -d. -f 1``lsb_release -rs | cut -d. -f 2`/sbsa/cuda-keyring_1.1-1_all.deb \
+        curl -O -fL https://developer.download.nvidia.com/compute/cuda/repos/ubuntu`lsb_release -rs | cut -d. -f 1``lsb_release -rs | cut -d. -f 2`/sbsa/cuda-keyring_1.1-1_all.deb \
         && dpkg -i cuda-keyring_1.1-1_all.deb \
-        && rm cuda-keyring_1.1-1_all.deb \
+        && rm -f cuda-keyring_1.1-1_all.deb \
     ; fi \
     && apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y \
@@ -328,6 +329,7 @@ RUN ${APT_CACHE_MOUNT} \
         libnvcomp5-dev-cuda-${CUDA_VERSION_MAJOR} \
         libnvcomp5-static-cuda-${CUDA_VERSION_MAJOR} \
         nvcomp-cuda-${CUDA_VERSION_MAJOR}
+
 
 RUN rm -rf /var/lib/apt/lists/*
 
@@ -344,11 +346,9 @@ RUN --mount=type=bind,from=pva-sdk,source=.,target=/tmp/pva-src \
     fi
 
 # repeated ARG because it has to be inside the FROM above
-# CMake 3.20+ (project minimum) initializes CMAKE_CUDA_ARCHITECTURES from CUDAARCHS
 ARG CONTAINER_TYPE=invalid
 ARG HSDK_VERSION=invalid
 ARG L4T_VERSION=invalid
-ARG CUDA_ARCHS=""
 ENV CONTAINER_TYPE=${CONTAINER_TYPE}
-ENV CUDAARCHS=${CUDA_ARCHS}
+ENV CUDA_NATIVE_ARCH=${CUDA_NATIVE_ARCH}
 
