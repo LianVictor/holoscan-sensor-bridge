@@ -15,6 +15,7 @@
 
 # See README.md for detailed information.
 
+import logging
 import sys
 from unittest import mock
 
@@ -34,7 +35,7 @@ from examples import imx274_pva_crc_validation
     ],
 )
 def test_imx274_pva_crc_validation(
-    camera_mode, headless, frame_limit, hololink_address, ibv_name, ibv_port, capsys
+    camera_mode, headless, frame_limit, hololink_address, ibv_name, ibv_port, caplog
 ):
     """
     Test IMX274 frame validation with PVA CRC hardware.
@@ -60,9 +61,13 @@ def test_imx274_pva_crc_validation(
     if headless:
         arguments.extend(["--headless"])
 
-    with mock.patch("sys.argv", arguments):
-        imx274_pva_crc_validation.main()
+    with caplog.at_level(logging.ERROR):
+        with mock.patch("sys.argv", arguments):
+            imx274_pva_crc_validation.main()
 
-        # check for errors
-        captured = capsys.readouterr()
-        assert captured.err == ""
+    # Fail if app logged any ERROR or CRITICAL
+    error_logs = [rec for rec in caplog.records if rec.levelno >= logging.ERROR]
+    assert not error_logs, (
+        f"PVA CRC validation logged {len(error_logs)} error(s); "
+        f"first: {error_logs[0].getMessage()}"
+    )

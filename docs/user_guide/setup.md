@@ -470,11 +470,11 @@ which is the RJ45 connector on the AGX Orin.
 
   **This step requires a system reboot to take effect.**
 
-- Install Holoscan SDK v3.11.0:
+- Install Holoscan SDK v4.0.0:
 
   ```none
   sudo apt update
-  sudo apt install holoscan-cuda-13=3.11.0*
+  sudo apt install holoscan-cuda-13=4.0.0*
   ```
 
 - Install other Holoscan sensor bridge dependencies:

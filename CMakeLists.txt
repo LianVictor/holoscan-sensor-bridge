@@ -57,7 +57,7 @@ include(hololink_deps/fmt)
 if (NOT HOLOLINK_BUILD_ONLY_NATIVE)
   # Find Holoscan if it is not already defined for source build with FetchContent
   if(NOT holoscan_SOURCE_DIR)
-    find_package(holoscan 3.6 REQUIRED CONFIG PATHS "/opt/nvidia/holoscan")
+    find_package(holoscan 4.0 REQUIRED CONFIG PATHS "/opt/nvidia/holoscan")
   endif()
 
   # enabled trace and debug log messages in debug build only

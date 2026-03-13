@@ -78,7 +78,7 @@ if (HSB_EMULATOR_BUILD_PYTHON AND NOT HSB_EMULATOR_TOT_BUILD)
     
     add_custom_command(TARGET _emulation_sensors POST_BUILD
         COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/build_pyvenv.sh $<TARGET_FILE_NAME:_emulation> $<TARGET_FILE_NAME:_emulation_sensors> "${CMAKE_CURRENT_SOURCE_DIR}/python" "${CMAKE_BINARY_DIR}/${HSB_EMULATOR_PYTHON_VENV}" ${CUDAToolkit_VERSION_MAJOR}
-        COMMENT "Copying _emulation_sensors extension to hololink/emulation/sensors/"
+        COMMENT "Building standalone hololink python environment"
     )
     
 endif()

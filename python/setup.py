@@ -75,6 +75,8 @@ setuptools.setup(
                 f"-DHOLOLINK_BUILD_SIPL={'ON' if os.path.isdir('/usr/src/jetson_sipl_api') else 'OFF'}",
                 f"-DHOLOLINK_BUILD_FUSA={'ON' if os.path.isdir('/usr/src/jetson_sipl_api/sipl/fusa') else 'OFF'}",
                 f"-DHOLOLINK_BUILD_PVA={'ON' if os.path.isdir('/opt/nvidia/pva-sdk-2.9') else 'OFF'}",
+                # build roce only if the infiniband device driver & devices are present. It is not enough to check for the directory presence, e.g. AGX Thor
+                f"-DHOLOLINK_BUILD_ROCE={'ON' if os.path.isdir('/sys/class/infiniband') and any(os.scandir('/sys/class/infiniband')) else 'OFF'}",
                 # Add this to debug the code
                 # "-DCMAKE_BUILD_TYPE=Debug",
                 "-DHOLOLINK_PYTHON_INSTALL_DIR:PATH=.",

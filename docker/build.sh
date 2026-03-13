@@ -26,7 +26,7 @@ dgpu=0
 usage=1
 GPU_CONFIG=
 # HSDK follows Major.Minor.Patch versioning scheme
-HSDK_VERSION="3.11.0"
+HSDK_VERSION="4.0.0"
 
 # detected and populated in script and used in docker build command
 PROTOTYPE_OPTIONS=""
@@ -92,6 +92,13 @@ if [ -z "$CUDA_NATIVE_ARCH" ]; then
 fi
 # The result above will be for example 890 for compute 8.9. Remove the trailing digit
 CUDA_NATIVE_ARCH="${CUDA_NATIVE_ARCH%?}"
+
+# detect infiniband devices. HOLOLINK_BUILD_ROCE is set to 1 if any are found
+IBV_DEVICES=""
+if [ -d /sys/class/infiniband/ ]
+then
+    IBV_DEVICES=$(ls /sys/class/infiniband/ | LC_COLLATE=C sort | tr '\n' ' ')
+fi
 
 # Do a bit of environment checking:
 # If we're running 'connmand' (e.g. IGX deployment)
@@ -250,6 +257,7 @@ echo "PROTOTYPE_OPTIONS: $PROTOTYPE_OPTIONS"
 echo "INSTALL_ENVIRONMENT: $INSTALL_ENVIRONMENT"
 echo "L4T_VERSION: $L4T_VERSION"
 echo "CUDA_NATIVE_ARCH: $CUDA_NATIVE_ARCH"
+echo "IBV_DEVICES: $IBV_DEVICES"
 set -x
 
 # Build the development container.  We specifically rely on buildkit skipping
@@ -261,6 +269,7 @@ DOCKER_BUILDKIT=1 docker build \
     --build-arg "HSDK_VERSION=$HSDK_VERSION" \
     --build-arg "L4T_VERSION=$L4T_VERSION" \
     --build-arg "CUDA_NATIVE_ARCH=$CUDA_NATIVE_ARCH" \
+    --build-arg "IBV_DEVICES=$IBV_DEVICES" \
     -t hololink-prototype:$VERSION \
     -f $HERE/Dockerfile \
     $PROTOTYPE_OPTIONS \

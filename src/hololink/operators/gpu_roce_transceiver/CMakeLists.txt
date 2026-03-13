@@ -75,8 +75,8 @@ endif()
 message(STATUS "gpu_roce_transceiver: build architectures ${LOCAL_CUDA_ARCHITECTURES} and native")
 set_property(TARGET gpu_roce_transceiver PROPERTY CUDA_ARCHITECTURES ${LOCAL_CUDA_ARCHITECTURES})
 
-# to silence doca api warnings
-target_compile_options(gpu_roce_transceiver PRIVATE -DDOCA_ALLOW_EXPERIMENTAL_API=1)
+# to silence doca api warnings publicly
+target_compile_options(gpu_roce_transceiver PUBLIC -DDOCA_ALLOW_EXPERIMENTAL_API=1)
 
 add_library(hololink::operators::gpu_roce_transceiver ALIAS gpu_roce_transceiver)
 

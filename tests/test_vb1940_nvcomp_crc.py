@@ -15,6 +15,7 @@
 
 # See README.md for detailed information.
 
+import logging
 import sys
 from unittest import mock
 
@@ -33,7 +34,7 @@ from examples import vb1940_fusa_nvcomp_crc_validation
     ],
 )
 def test_vb1940_nvcomp_crc_validation(
-    camera_mode, headless, frame_limit, hololink_address, capsys
+    camera_mode, headless, frame_limit, hololink_address, caplog
 ):
     """
     Test VB1940 frame validation with nvCOMP CRC.
@@ -55,9 +56,13 @@ def test_vb1940_nvcomp_crc_validation(
     if headless:
         arguments.extend(["--headless"])
 
-    with mock.patch("sys.argv", arguments):
-        vb1940_fusa_nvcomp_crc_validation.main()
+    with caplog.at_level(logging.ERROR):
+        with mock.patch("sys.argv", arguments):
+            vb1940_fusa_nvcomp_crc_validation.main()
 
-        # check for errors
-        captured = capsys.readouterr()
-        assert captured.err == ""
+    # Fail if app logged any ERROR or CRITICAL
+    error_logs = [rec for rec in caplog.records if rec.levelno >= logging.ERROR]
+    assert not error_logs, (
+        f"nvCOMP CRC validation logged {len(error_logs)} error(s); "
+        f"first: {error_logs[0].getMessage()}"
+    )

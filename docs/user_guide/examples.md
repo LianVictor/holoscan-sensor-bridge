@@ -337,7 +337,7 @@ python3 examples/ecam0m30tof_player.py --hololink 192.168.0.2 --camera-mode=<0|1
 
 **This example will not run on AGX Thor**
 
-## Running frame validation examples
+## Running CPU and GPU frame validation examples
 
 Frame validation examples demonstrate how to access frame metadata in order to detect
 missing frames, frame timestamp misalignment and frame CRC errors. These examples record
@@ -431,6 +431,97 @@ avoid misleading errors occurring due to this known condition.
 
 **This example will not run on AGX Thor**
 
+### Li VB1940 Eagle
+
+#### FUSA CoE Receiver (nvCOMP)
+
+For systems with FUSA (Functional Safety) CoE (Camera over Ethernet) support such as AGX
+Thor, `examples/vb1940_fusa_nvcomp_crc_validation.py` provides high-performance frame
+validation with GPU-accelerated CRC checking using nvCOMP 5.0. This example uses the
+FUSA CoE capture operator for accelerated network data transfer.
+
+Before running the app,
+[enable PTP sync](https://docs.nvidia.com/holoscan/sensor-bridge/latest/setup.html#) on
+your setup, then use the following command:
+
+```sh
+$ python3 examples/vb1940_fusa_nvcomp_crc_validation.py
+```
+
+[GPU-based CRC using nvCOMP 5.0](https://docs.nvidia.com/cuda/nvcomp/crc32.html) is fast
+enough to validate every frame by default. The application computes CRC on the full CSI
+frame (including CSI header and trailing bytes) to match the camera's FPGA CRC
+computation.
+
+At the end of execution, the application provides a CRC validation report showing total
+frames processed, CRC errors detected, and success rate, followed by detailed
+performance metrics including frame time, FUSA capture latency, operator latency, and
+processing time.
+
+#### Performance
+
+The nvCOMP CRC calculation performance on AGX Thor for Li VB1940 Eagle camera
+configuration (measured over 1000 frames):
+
+```text
+Minimum: 554.4 us
+Maximum: 631.0 us
+Average: 614.3 us
+```
+
+## Running PVA frame validation examples
+
+PVA CRC validation examples demonstrate hardware-accelerated CRC computation using
+NVIDIA PVA (Programmable Vision Accelerator) to validate camera frames. These examples
+compare PVA-computed CRC values against camera FPGA-embedded CRC values to detect data
+corruption.
+
+For requirements and build instructions, see the
+[PVA CRC README](../../python/hololink/operators/pva_crc/README.md).
+
+To run the PVA CRC validation examples, first set the `LD_LIBRARY_PATH` environment
+variable (required before running any application). Within the demo container:
+
+```sh
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/aarch64-linux-gnu/tegra/:/opt/nvidia/pva-sdk-2.9/lib/aarch64-linux-gnu/:/usr/lib/aarch64-linux-gnu/nvidia
+```
+
+To run the IMX274 PVA CRC validation example (tested on IGX Orin with dGPU):
+
+```sh
+$ python3 examples/imx274_pva_crc_validation.py --frame-limit 100
+```
+
+To run the Li VB1940 Eagle PVA CRC validation example (tested on AGX Thor):
+
+```sh
+$ python3 examples/vb1940_fusa_pva_crc_validation.py --frame-limit 100
+```
+
+### Performance
+
+#### IMX274
+
+The PVA CRC calculation performance on IGX-dGPU for single-camera configuration with 4K
+resolution (measured over 1000 frames):
+
+```text
+Minimum: 412 us
+Maximum: 442 us
+Average: 414 us
+```
+
+#### Li VB1940 Eagle
+
+The PVA CRC calculation performance on AGX Thor for single-camera configuration with
+1080p resolution (measured over 1000 frames):
+
+```text
+Minimum: 106 us
+Maximum: 137 us
+Average: 111 us
+```
+
 ## Running the UART dual-board example
 
 `examples/uart_dual_board_loopback.py` tests UART between two boards.
@@ -469,97 +560,6 @@ Pass `--mode` (`tx`, `rx`, or `dual`), `--hololink` for each board's IP, and opt
 
 The UART FIFO size is 256 bytes. Both applications chunk data accordingly and verify
 transmitted vs. received data.
-
-### VB1940 Eagle
-
-#### FUSA CoE Receiver (nvCOMP)
-
-For systems with FUSA (Functional Safety) CoE (Camera over Ethernet) support such as AGX
-Thor, `examples/vb1940_fusa_nvcomp_crc_validation.py` provides high-performance frame
-validation with GPU-accelerated CRC checking using nvCOMP 5.0. This example uses the
-FUSA CoE capture operator for accelerated network data transfer.
-
-Before running the app,
-[enable PTP sync](https://docs.nvidia.com/holoscan/sensor-bridge/latest/setup.html#) on
-your setup, then use the following command:
-
-```sh
-$ python3 examples/vb1940_fusa_nvcomp_crc_validation.py
-```
-
-[GPU-based CRC using nvCOMP 5.0](https://docs.nvidia.com/cuda/nvcomp/crc32.html) is fast
-enough to validate every frame by default. The application computes CRC on the full CSI
-frame (including CSI header and trailing bytes) to match the camera's FPGA CRC
-computation.
-
-At the end of execution, the application provides a CRC validation report showing total
-frames processed, CRC errors detected, and success rate, followed by detailed
-performance metrics including frame time, FUSA capture latency, operator latency, and
-processing time.
-
-#### Performance
-
-The nvCOMP CRC calculation performance on AGX Thor for VB1940 camera configuration
-(measured over 1000 frames):
-
-```text
-Minimum: 0.5544 ms
-Maximum: 0.6310 ms
-Average: 0.6143 ms
-```
-
-## Running PVA CRC validation examples
-
-PVA CRC validation examples demonstrate hardware-accelerated CRC computation using
-NVIDIA PVA (Programmable Vision Accelerator) to validate camera frames. These examples
-compare PVA-computed CRC values against camera FPGA-embedded CRC values to detect data
-corruption.
-
-For requirements and build instructions, see the
-[PVA CRC README](../../python/hololink/operators/pva_crc/README.md).
-
-To run the PVA CRC validation examples, first set the `LD_LIBRARY_PATH` environment
-variable (required before running any application). Within the demo container:
-
-```sh
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/aarch64-linux-gnu/tegra/:/opt/nvidia/pva-sdk-2.9/lib/aarch64-linux-gnu/:/usr/lib/aarch64-linux-gnu/nvidia
-```
-
-To run the IMX274 PVA CRC validation example (tested on IGX Orin with dGPU):
-
-```sh
-$ python3 examples/imx274_pva_crc_validation.py --frame-limit 100
-```
-
-To run the VB1940 PVA CRC validation example (tested on AGX Thor):
-
-```sh
-$ python3 examples/vb1940_fusa_pva_crc_validation.py --frame-limit 100
-```
-
-### Performance
-
-#### IMX274
-
-The PVA CRC calculation performance on IGX-dGPU for single-camera configuration with 4K
-resolution (measured over 1000 frames):
-
-```text
-Minimum: 412 us
-Maximum: 442 us
-Average: 414 us
-```
-
-#### VB1940
-
-The PVA CRC calculation performance on AGX Thor for single-camera configuration with
-1080p resolution (measured over 1000 frames):
-
-```text
-Minimum: 106 us
-Maximum: 137 us
-Average: 111 us
-```
 
 ## Sub-Frame Processing Examples
 
@@ -635,56 +635,3 @@ reduced memory requirements.
 
 - **Network**: Sub-frame size should align with network packet sizes to minimize partial
   sub-frames and improve efficiency.
-
-## Running PVA CRC validation examples
-
-PVA CRC validation examples demonstrate hardware-accelerated CRC computation using
-NVIDIA PVA (Programmable Vision Accelerator) to validate camera frames. These examples
-compare PVA-computed CRC values against camera FPGA-embedded CRC values to detect data
-corruption.
-
-For requirements and build instructions, see the
-[PVA CRC README](../../python/hololink/operators/pva_crc/README.md).
-
-To run the PVA CRC validation examples, first set the `LD_LIBRARY_PATH` environment
-variable (required before running any application). Within the demo container:
-
-```sh
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/usr/lib/aarch64-linux-gnu/tegra/:/opt/nvidia/pva-sdk-2.9/lib/aarch64-linux-gnu/:/usr/lib/aarch64-linux-gnu/nvidia
-```
-
-To run the IMX274 PVA CRC validation example (tested on IGX Orin with dGPU):
-
-```sh
-$ python3 examples/imx274_pva_crc_validation.py --frame-limit 100
-```
-
-To run the VB1940 PVA CRC validation example (tested on AGX Thor):
-
-```sh
-$ python3 examples/vb1940_fusa_pva_crc_validation.py --frame-limit 100 
-```
-
-### Performance
-
-#### IMX274
-
-The PVA CRC calculation performance on IGX-dGPU for single-camera configuration with 4K
-resolution (measured over 1000 frames):
-
-```text
-Minimum: 412 us
-Maximum: 442 us
-Average: 414 us
-```
-
-#### VB1940
-
-The PVA CRC calculation performance on AGX Thor for single-camera configuration with
-1080p resolution (measured over 1000 frames):
-
-```text
-Minimum: 106 us
-Maximum: 137 us
-Average: 111 us
-```

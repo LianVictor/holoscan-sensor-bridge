@@ -21,12 +21,8 @@ target_sources(hololink
     gui_renderer.cpp
     holoargs.cpp
     cuda_helper.cpp
-    $<$<BOOL:${HOLOLINK_BUILD_ROCE}>:tools.cpp>
+    tools.cpp
 )
-
-if (HOLOLINK_BUILD_ROCE)
-  find_package(ibverbs REQUIRED)
-endif()
 
 set_property(TARGET hololink PROPERTY POSITION_INDEPENDENT_CODE ON)
 
@@ -58,6 +54,9 @@ target_link_libraries(hololink
   )
 
 if (HOLOLINK_BUILD_ROCE)
+  find_package(ibverbs REQUIRED)
+  # set HAS_IBVERBS if ibverbs found
+  target_compile_options(hololink PRIVATE -DHAS_IBVERBS=1)
   target_link_libraries(hololink PRIVATE ${ibverbs_LIBRARIES})
 endif() # HOLOLINK_BUILD_ROCE
 

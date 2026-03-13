@@ -18,7 +18,7 @@ host system, run `sh docs/make_docs.sh`, then use your browser to look at
 
 ### Updates from 2.5-GA
 
-- **HSDK 3.11** HSB is updated to support running under HSDK 3.11.
+- **HSDK 4.0** HSB is updated to support running under HSDK 4.0.
 - **Thor and JetPack 7.1** Support for receive-only RDMA on AGX Thor units (with mgbe
   NICs) is provided.
 - **ComputeCrcOp** and **CheckCrcOp** use [nvCOMP](https://developer.nvidia.com/nvcomp)

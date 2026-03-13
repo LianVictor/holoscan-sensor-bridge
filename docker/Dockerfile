@@ -20,7 +20,7 @@
 # in order to mount driver and development dependencies
 
 ARG CONTAINER_TYPE=invalid
-ARG HSDK_VERSION=3.11.0
+ARG HSDK_VERSION=4.0.0
 ARG DRIVER_CUDA_VERSION_MAJOR=invalid
 ARG APT_CACHE_MOUNT="--mount=type=cache,target=/var/cache/apt,sharing=locked \
     --mount=type=cache,target=/var/lib/apt,sharing=locked"
@@ -34,9 +34,7 @@ ENV CUDA_VERSION="${CUDA_VERSION:-12.6.3}"
 # the l4t dgpu repository does not match the L4T version in IGX 1.2+; pinned at 36.4.1
 RUN ${APT_CACHE_MOUNT} apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y curl \
     && echo "deb https://repo.download.nvidia.com/jetson/dgpu-rm r36.4.1 main" > /etc/apt/sources.list.d/nvidia-l4t-apt-source.list \
-    && curl -Os --output-dir /etc/apt/trusted.gpg.d/ https://repo.download.nvidia.com/jetson/jetson-ota-public.asc \
-    && apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y -t r36.4.1 holoscan="${HSDK_VERSION}*"
+    && curl -Os --output-dir /etc/apt/trusted.gpg.d/ https://repo.download.nvidia.com/jetson/jetson-ota-public.asc
 
 # PVA CRC wheel build needs NvSciBuf (required by cuPVA). Copy from host when building on IGX/L4T.
 COPY --from=l4t-libs \
@@ -178,11 +176,19 @@ FROM build_${CONTAINER_TYPE}
 ARG HSDK_VERSION=invalid
 ARG L4T_VERSION=invalid
 ARG CUDA_NATIVE_ARCH=invalid
+ARG IBV_DEVICES=
+ARG TARGETARCH
+ARG DOCA_VERSION=3.3.0
+ARG DEBIAN_FRONTEND=noninteractive
 
+# controls whether roce is disabled in builds (no IBV_DEVICES-->no roce)
+ENV IBV_DEVICES=${IBV_DEVICES}
 # the python environment is protected in the cuda containers, so enable breaking system packages for all containers
 ENV PIP_BREAK_SYSTEM_PACKAGES=1
 # run as root user...ignore warnings about installing as root inside container
 ENV PIP_ROOT_USER_ACTION=ignore
+ENV CONTAINER_TYPE=${CONTAINER_TYPE}
+ENV CUDA_NATIVE_ARCH=${CUDA_NATIVE_ARCH}
 ENV CUDA_VERSION_MAJOR="${CUDA_VERSION%%.*}"
 ENV CUDA_VERSION_MINOR_PATCH="${CUDA_VERSION#*.}"
 ENV CUDA_VERSION_MINOR="${CUDA_VERSION_MINOR_PATCH%%.*}"
@@ -197,27 +203,25 @@ RUN ${APT_CACHE_MOUNT} apt-get update \
     curl \
     gnupg
 
-ARG TARGETARCH
-ARG DOCA_VERSION=3.3.0
-ARG DEBIAN_FRONTEND=noninteractive
-
 WORKDIR /opt
 
 # Configure the DOCA APT repository
-RUN if [ "${TARGETARCH}" = "amd64" ]; then \
-        DOCA_ARCH="amd64"; \
-    elif [ "${TARGETARCH}" = "arm64" ]; then \
-        DOCA_ARCH="arm64"; \
-    else \
-        echo "Unknown architecture: $TARGETARCH"; \
-        exit 1; \
-    fi \
-    && apt-get update \
-    && UBUNTU_VERSION=$(cat /etc/os-release | grep "VERSION_ID" | awk -F'=' '{print $2}' | sed 's/[."]//g') \
-    && curl -fL -O https://www.mellanox.com/downloads/DOCA/DOCA_v${DOCA_VERSION}/host/doca-host_${DOCA_VERSION}-088000-26.01-ubuntu${UBUNTU_VERSION}_${DOCA_ARCH}.deb \
-    && apt-get install -o DPkg::Options::="--force-confnew" -y ./doca-host_${DOCA_VERSION}-088000-26.01-ubuntu${UBUNTU_VERSION}_${DOCA_ARCH}.deb \
-    && rm -f ./doca-host_${DOCA_VERSION}-088000-26.01-ubuntu${UBUNTU_VERSION}_${DOCA_ARCH}.deb \
-    && apt-get update
+RUN if [ -n "$IBV_DEVICES" ] ; then \
+        if [ "${TARGETARCH}" = "amd64" ]; then \
+            DOCA_ARCH="amd64"; \
+        elif [ "${TARGETARCH}" = "arm64" ]; then \
+            DOCA_ARCH="arm64"; \
+        else \
+            echo "Unknown architecture: $TARGETARCH"; \
+            exit 1; \
+        fi \
+        && apt-get update \
+        && UBUNTU_VERSION=$(cat /etc/os-release | grep "VERSION_ID" | awk -F'=' '{print $2}' | sed 's/[."]//g') \
+        && curl -fL -O https://www.mellanox.com/downloads/DOCA/DOCA_v${DOCA_VERSION}/host/doca-host_${DOCA_VERSION}-088000-26.01-ubuntu${UBUNTU_VERSION}_${DOCA_ARCH}.deb \
+        && apt-get install -o DPkg::Options::="--force-confnew" -y ./doca-host_${DOCA_VERSION}-088000-26.01-ubuntu${UBUNTU_VERSION}_${DOCA_ARCH}.deb \
+        && rm -f ./doca-host_${DOCA_VERSION}-088000-26.01-ubuntu${UBUNTU_VERSION}_${DOCA_ARCH}.deb \
+        && apt-get update \
+    ; fi
 
 # Set up CMake PPA for CMake 3.31
 RUN ${APT_CACHE_MOUNT} \
@@ -257,7 +261,6 @@ RUN ${APT_CACHE_MOUNT} apt-get update \
     # Development libraries
     python3-setuptools \
     python3-dev \
-    libibverbs-dev \
     libnuma-dev \
     libelf-dev \
     libfmt-dev \
@@ -273,13 +276,16 @@ RUN ${APT_CACHE_MOUNT} apt-get update \
     cuda-driver-dev-${CUDA_VERSION_MAJOR}-${CUDA_VERSION_MINOR}
 
 # install cx-7 and doca dependencies
-RUN ${APT_CACHE_MOUNT} apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
-    pkgconf \
-    libdoca-sdk-gpunetio-dev \
-    libdoca-sdk-verbs-dev \
-    mlnx-ofed-kernel-utils \
-    ibverbs-utils
+RUN if [ -n "$IBV_DEVICES" ] ; then \
+        ${APT_CACHE_MOUNT} apt-get update \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -y -q \
+        pkgconf \
+        libibverbs-dev \
+        libdoca-sdk-gpunetio-dev \
+        libdoca-sdk-verbs-dev \
+        mlnx-ofed-kernel-utils \
+        ibverbs-utils \
+    ; fi
 
 # python package dependencies
 # holoscan has a minimum pip version requirement that cannot be satisfied by the debian package
@@ -309,7 +315,7 @@ RUN ${APT_CACHE_MOUNT} \
     ; fi \
     ; if ! apt list --installed 2>/dev/null | grep -qi "holoscan-cuda" ; then \
         echo "holoscan-cuda-${CUDA_VERSION_MAJOR}=${HSDK_VERSION} not found, using 'holoscan' package" \
-        && DEBIAN_FRONTEND=noninteractive apt-get install -y holoscan=${HSDK_VERSION}* \
+        && DEBIAN_FRONTEND=noninteractive apt-get install -y --allow-downgrades holoscan=${HSDK_VERSION}* \
     ; fi
 RUN echo "/opt/nvidia/holoscan/lib" >> /etc/ld.so.conf.d/holoscan.conf \
     && ldconfig \
@@ -349,6 +355,4 @@ RUN --mount=type=bind,from=pva-sdk,source=.,target=/tmp/pva-src \
 ARG CONTAINER_TYPE=invalid
 ARG HSDK_VERSION=invalid
 ARG L4T_VERSION=invalid
-ENV CONTAINER_TYPE=${CONTAINER_TYPE}
-ENV CUDA_NATIVE_ARCH=${CUDA_NATIVE_ARCH}
 
