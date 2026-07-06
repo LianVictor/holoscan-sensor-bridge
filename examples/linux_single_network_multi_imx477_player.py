@@ -284,14 +284,12 @@ def main():
     # Check rev2 board based on uuid, if uuid then allow the next set, if not continue as normal
 
     # -------------------------------------------------------------------------
-    # Portion of code is duplicated and modified from
-    # Src: holoscan-sensor-bridge/tests/test_hololink_enumeration.py: ln 54
     uuid_strategy = hololink_module.BasicEnumerationStrategy(
         total_sensors=4,
         total_dataplanes=2,
         sifs_per_sensor=1,
     )
-    rev2_uuid = "ed6a9292-debf-40ac-b603-a24e025309c1"
+    rev2_uuid = "48484948-5045-4848-4853-564845484850"
     hololink_module.Enumerator.set_uuid_strategy(rev2_uuid, uuid_strategy)
 
     # -------------------------------------------------------------------------
