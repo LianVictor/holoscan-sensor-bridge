@@ -69,7 +69,7 @@ class MicroApplication(holoscan.core.Application):
         self._cuda_context = cuda_context
         self._cuda_device_ordinal = cuda_device_ordinal
         self._ibv_name = ibv_name
-        self._ibv_port = ibv_port        
+        self._ibv_port = ibv_port
         self._hololink_channels = hololink_channels
         self._cameras = cameras
         self._frame_limit = frame_limit
@@ -249,7 +249,7 @@ def main():
         type=int,
         default=1,
         help="Port number of IBV device",
-    )    
+    )
     parser.add_argument(
         "--pattern",
         action="store_true",
@@ -339,7 +339,7 @@ def main():
         cu_context,
         cu_device_ordinal,
         args.ibv_name,
-        args.ibv_port,        
+        args.ibv_port,
         hololink_channels,
         cameras,
         args.frame_limit,
