@@ -19,6 +19,6 @@ fpga_uuid:
 firmware_versions:
   - version: 0x2606
     cpnx:
-      - location: https://ww1.microchip.com/downloads/aemDocuments/documents/FPGA/SOCDesignFiles/PF_HSB_c2_2606_28_july2026.spi
+      - location: https://ww1.microchip.com/downloads/aemDocuments/documents/FPGA/SOCDesignFiles/PF_HSB_c2_2606.spi
         md5: 33b6ce2c61a33268cd7bb5d719d5a86a
         size: 6135712
