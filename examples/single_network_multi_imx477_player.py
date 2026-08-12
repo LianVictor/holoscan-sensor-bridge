@@ -282,6 +282,7 @@ def main():
         "--num-cameras",
         type=int,
         default=2,
+        choices=range(1, 5),
         help="Number of cameras to showcase (up to 4 if using Rev 2 board)",
     )
     args = parser.parse_args()

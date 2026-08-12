@@ -140,7 +140,7 @@ class PostprocessorOp(Operator):
                 depth_normalized.get().astype("uint8"), cv2.COLORMAP_JET
             )
             image = (image * 255).astype(cp.uint8)
-            output_image = cp.hstack((image, depth_colormap))
+            output_image = cp.hstack((image, cp.asarray(depth_colormap)))
         else:
             # Interactive mode
             depth_normalized = self.normalize(inference_output)
@@ -152,10 +152,10 @@ class PostprocessorOp(Operator):
             output_image = cp.hstack(
                 (
                     image[:, :pos, :],
-                    depth_colormap[
+                    cp.asarray(depth_colormap[
                         :,
                         pos:,
-                    ],
+                    ]),
                 )
             )
 
@@ -306,7 +306,7 @@ def main():
     args = parser.parse_args()
 
     if args.config == "none":
-        config_file = os.path.join(os.path.dirname(__file__), "depth_anything_v2.yaml")
+        config_file = os.path.join(os.path.dirname(__file__), "depth.yaml")
     else:
         config_file = args.config
 
