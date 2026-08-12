@@ -163,7 +163,7 @@ namespace {
             metadata["fpga_uuid"] = HOLOLINK_100G_UUID;
         } else if (board_id == MICROCHIP_POLARFIRE_BOARD_ID) {
             metadata["fpga_uuid"] = MICROCHIP_POLARFIRE_UUID;
-        } else if (board_id == MICROCHIP_POLARFIRE_BOARD_ID) {
+        } else if (board_id == MICROCHIP_POLARFIRE_BOARD_R2_ID) {
             metadata["fpga_uuid"] = MICROCHIP_POLARFIRE_R2_UUID;
         } else if (board_id == LEOPARD_EAGLE_BOARD_ID) {
             metadata["fpga_uuid"] = LEOPARD_EAGLE_UUID;

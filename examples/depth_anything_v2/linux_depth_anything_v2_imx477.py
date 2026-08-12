@@ -34,10 +34,12 @@ Download model (outside docker) inside the directory of: holoscan-sensor-bridge/
 Start holoscan docker and install opencv(this step would need to be done every time the docker is restarted)
     pip install opencv-python-headless
 
-Navigate to examples/depth_anything_v2/depth_anything_v2-onnx-float/ and run the following:
+Navigate to examples/depth_anything_v2/depth_anything_v2-onnx-float/ and run the following(inside docker demo):
     trtexec --onnx=depth_anything_v2.onnx   --saveEngine=depth.engine.fp32
     cp depth.engine.fp32 ../../../
     cd ../../../
+
+Run the demo itself:
     python3 examples/depth_anything_v2/linux_depth_anything_v2_imx477.py
 
 
