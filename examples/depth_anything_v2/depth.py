@@ -106,7 +106,8 @@ class PostprocessorOp(Operator):
 
     # Update size of holoviz framer buffer which will be used to calculate self.ratio
     def framebuffer_size_callback(self, *args):
-        self.framebuffer_size = args[0]
+        if args[0] > 0:
+            self.framebuffer_size = args[0]
 
     def normalize(self, depth_map):
         min_value = cp.min(depth_map)
@@ -154,10 +155,12 @@ class PostprocessorOp(Operator):
             output_image = cp.hstack(
                 (
                     image[:, :pos, :],
-                    cp.asarray(depth_colormap[
-                        :,
-                        pos:,
-                    ]),
+                    cp.asarray(
+                        depth_colormap[
+                            :,
+                            pos:,
+                        ]
+                    ),
                 )
             )
 
