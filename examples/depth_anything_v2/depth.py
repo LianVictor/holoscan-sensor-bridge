@@ -44,6 +44,8 @@ class PostprocessorOp(Operator):
         self.current_display_mode = self.display_modes[self.idx]
         # In interactive mode, how much of the original video to show
         self.ratio = 0.5
+        self.x = 0
+        self.framebuffer_size = 1
 
     def setup(self, spec: OperatorSpec):
         """
