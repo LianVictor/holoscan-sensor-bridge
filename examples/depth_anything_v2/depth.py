@@ -88,8 +88,9 @@ class PostprocessorOp(Operator):
         #   - update the ratio of the original image to display
         if mouse_button.value != LEFT_BUTTON:
             self.mouse_pressed = action.value == PRESSED
-            self.x = self.clamp(self.x, 0, self.framebuffer_size)
-            self.ratio = self.x / self.framebuffer_size
+            if self.framebuffer_size > 0:
+                self.x = self.clamp(self.x, 0, self.framebuffer_size)
+                self.ratio = self.x / self.framebuffer_size
             return
 
         # When left mouse button is pressed, update the display mode
