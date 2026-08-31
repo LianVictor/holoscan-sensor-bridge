@@ -25,6 +25,7 @@ _MODULES = [
     "edepth",
     "imx477",
     "imx715",
+    "imx715lp",
     "vb1940",
 ]
 

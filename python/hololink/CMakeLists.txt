@@ -21,6 +21,7 @@ copy_hololink_python_files(
         __init__.py
         renesas_bajoran_lite_ts1.py
         renesas_bajoran_lite_ts2.py
+        renesas_bajoran_lite_ts3.py
 )
 
 add_subdirectory(hololink_core)

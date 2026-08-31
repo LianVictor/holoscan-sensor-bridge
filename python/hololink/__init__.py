@@ -23,6 +23,7 @@ from . import (
     operators,
     renesas_bajoran_lite_ts1,
     renesas_bajoran_lite_ts2,
+    renesas_bajoran_lite_ts3,
     sensors,
 )
 from ._hololink import (
@@ -238,6 +239,7 @@ __all__ = [
     "operators",
     "renesas_bajoran_lite_ts1",
     "renesas_bajoran_lite_ts2",
+    "renesas_bajoran_lite_ts3",
     "round_up",
     "sensors",
     "log_timestamp_s",

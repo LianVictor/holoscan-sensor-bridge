@@ -770,6 +770,7 @@ list(APPEND EXAMPLE_INSTALL_FILES
     imx274_player.py
     imx477_player.py
     imx715_player.py
+    imx715_leopard_player.py
     linux_audio_player.py
     linux_body_pose_estimation_imx477.py
     linux_body_pose_estimation.py
@@ -778,6 +779,7 @@ list(APPEND EXAMPLE_INSTALL_FILES
     linux_imx274_player.py
     linux_imx477_player.py
     linux_imx715_player.py
+    linux_imx715_leopard_player.py
     linux_single_network_stereo_imx274_player.py
     linux_single_network_stereo_imx477_player.py
     linux_single_network_stereo_vb1940_player.py
