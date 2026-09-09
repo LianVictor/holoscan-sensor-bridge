@@ -177,6 +177,7 @@ setuptools.setup(
         "hololink/sensors/ecam0m30tof",
         "hololink/sensors/imx274",
         "hololink/sensors/imx715",
+        "hololink/sensors/imx715lp",
         "hololink/sensors/vb1940",
         "hololink/sensors/ecam0m30tof",
         "hololink_module",
