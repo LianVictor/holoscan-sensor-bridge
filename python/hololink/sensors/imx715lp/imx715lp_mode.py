@@ -23,7 +23,7 @@ import hololink
 # values are on hex number system to be consistent with rest of the list
 IMX715_TABLE_WAIT_MS = "imx715-table-wait-ms"
 IMX715_WAIT_MS = 0x01
-IMX715_WAIT_MS_START = 0x0F
+IMX715_WAIT_MS_START = 0x19  # 25 ms; datasheet requires >=24 ms after standby cancel
 
 # Register addresses for camera properties. They only accept 8bits of value.
 
@@ -38,8 +38,16 @@ REG_VMAX_LSB = 0x3024
 REG_G_LSB = 0x3090
 REG_G_MSB = 0x3091
 
-# Trigger/Sync Mode
-REG_TRIGGER_MODE = 0x30C1
+# Master/Slave mode: 0x3003[0] XMASTER (0=master, 1=slave)
+REG_XMASTER = 0x3003
+MASTER_MODE_VALUE = 0x00
+SLAVE_MODE_VALUE = 0x01
+
+# XVS/XHS output select: 0x30C0 XVSOUTSEL[1:0], XHSOUTSEL[3:2]
+REG_XVSOUTSEL = 0x30C0
+
+# XVS/XHS drive strength: 0x30C1 XVS_DRV[1:0], XHS_DRV[3:2]
+REG_XVS_XHS_DRV = 0x30C1
 
 
 imx715_start = [
@@ -184,7 +192,7 @@ imx715_mode_3840X2176_30fps_10bit = [
     (0x3046, 0x00),  # VWIDTH
     (0x3047, 0x11),
     (0x3050, 0x08),  # SHR0
-    (0x30C1, 0x00),  # XVS/XHS pin setting
+    (0x30C1, 0x00),  # XVS/XHS drive strength (minimum); master/slave via REG_XMASTER
     # INCK
     (0x3115, 0x00),
     (0x3116, 0x24),
@@ -238,7 +246,7 @@ imx715_mode_3840X2176_30fps_12bit = [
     (0x3046, 0x00),  # VWIDTH
     (0x3047, 0x11),
     (0x3050, 0x08),  # SHR0
-    (0x30C1, 0x00),  # XVS/XHS pin setting
+    (0x30C1, 0x00),  # XVS/XHS drive strength (minimum); master/slave via REG_XMASTER
     # INCK
     (0x3115, 0x00),
     (0x3116, 0x24),
@@ -292,7 +300,7 @@ imx715_mode_3840X2176_60fps_10bit = [
     (0x3046, 0x00),  # VWIDTH
     (0x3047, 0x11),
     (0x3050, 0x08),  # SHR0
-    (0x30C1, 0x00),  # XVS/XHS pin setting
+    (0x30C1, 0x00),  # XVS/XHS drive strength (minimum); master/slave via REG_XMASTER
     # INCK
     (0x3115, 0x00),
     (0x3116, 0x24),
@@ -345,7 +353,7 @@ imx715_mode_3840X2176_60fps_12bit = [
     (0x3046, 0x00),  # VWIDTH
     (0x3047, 0x11),
     (0x3050, 0x08),  # SHR0
-    (0x30C1, 0x00),  # XVS/XHS pin setting
+    (0x30C1, 0x00),  # XVS/XHS drive strength (minimum); master/slave via REG_XMASTER
     # INCK
     (0x3115, 0x00),
     (0x3116, 0x24),
@@ -374,7 +382,7 @@ imx715_mode_3840X2176_60fps_12bit = [
     (IMX715_TABLE_WAIT_MS, IMX715_WAIT_MS),
 ]
 
-# IMX715-AAQR window cropping 3840x2176 CSI-2_4lane 37.125Mhz AD:10bit Output:10bit 2736Mbps Master Mode 90fps
+# IMX715-AAQR window cropping 3840x2176 CSI-2_4lane 37.125Mhz AD:10bit Output:10bit 2376Mbps Master Mode 90fps
 imx715_mode_3840X2176_90fps_10bit = [
     (IMX715_TABLE_WAIT_MS, IMX715_WAIT_MS),
     (0x3008, 0x7F),
@@ -387,7 +395,7 @@ imx715_mode_3840X2176_90fps_10bit = [
     (0x3031, 0x00),  # ADBIT(0=10-bit)
     (0x3032, 0x00),  # MDBIT(0=10-bit)
     (0x3701, 0x00),  # ADBIT1(0=10-bit)
-    (0x3033, 0x00),  # 0=2736Mbps
+    (0x3033, 0x00),  # SYS_MODE 0=2376Mbps
     # crop
     (0x3040, 0x0C),  # HST
     (0x3041, 0x00),
@@ -398,7 +406,7 @@ imx715_mode_3840X2176_90fps_10bit = [
     (0x3046, 0x00),  # VWIDTH
     (0x3047, 0x11),
     (0x3050, 0x08),  # SHR0
-    (0x30C1, 0x00),  # XVS/XHS pin setting
+    (0x30C1, 0x00),  # XVS/XHS drive strength (minimum); master/slave via REG_XMASTER
     # INCK
     (0x3115, 0x00),
     (0x3116, 0x24),
@@ -435,6 +443,24 @@ class Imx715_Mode(Enum):
     IMX715_MODE_3840X2176_60FPS_12BIT = 3
     IMX715_MODE_3840X2176_90FPS_10BIT = 4
     Unknown = 5
+
+
+def create_slave_mode_config(master_config):
+    """Create a slave mode configuration from a master mode configuration.
+
+    In slave mode, the camera synchronizes its frame timing to the XVS (vertical sync)
+    input signal. This is useful for multi-camera synchronization.
+
+    Args:
+        master_config: List of (register, value) tuples for master mode
+
+    Returns:
+        List of tuples configured for slave mode (same as master mode since
+        slave/master mode is set via REG_XMASTER at runtime)
+    """
+    # The register configurations are the same; sync mode is set separately
+    # via configure_sync_mode() which writes REG_XMASTER (0x3003)
+    return master_config.copy()
 
 
 frame_format = namedtuple(

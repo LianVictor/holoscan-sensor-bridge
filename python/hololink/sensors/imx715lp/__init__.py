@@ -13,10 +13,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from .imx715lp import Imx715Cam
+from .imx715lp import Imx715Cam, SyncMode
 from .imx715lp_mode import Imx715_Mode
 
 __all__ = [
     "Imx715Cam",
+    "SyncMode",
     "Imx715_Mode",
 ]

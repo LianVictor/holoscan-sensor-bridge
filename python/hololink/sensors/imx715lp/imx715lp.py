@@ -17,6 +17,7 @@ limitations under the License.
 
 import logging
 import time
+from enum import Enum
 
 import hololink as hololink_module
 
@@ -31,8 +32,14 @@ CAM_I2C_ADDRESS = 0x1A
 
 # VSYNC  config
 VSYNC_GPIO_MUX_BASE = 0x70000000
-VSYNC_GPIO_MUX_EN_OFFSET = 0x0014
+VSYNC_ENABLE_OFFSET = 0x0000
 VSYNC_FREQUENCY_MODE_OFFSET = 0x0004
+VSYNC_DELAY_OFFSET = 0x0008
+VSYNC_START_OFFSET = 0x00C
+VSYNC_EXPOSURE_OFFSET = 0x0010
+VSYNC_GPIO_MUX_EN_OFFSET = 0x0014
+VSYNC_EXPOSURE_DEFAULT_NS = 0xF4240  # 1 ms pulse width
+
 GPIO_PIN_DEFAULT = 0x0040
 
 # VSYNC Frequency
@@ -43,18 +50,42 @@ PERIOD_90HZ = 3
 PERIOD_120HZ = 4
 
 
+class SyncMode(Enum):
+    """Camera synchronization modes."""
+
+    MASTER_FREE_RUN = 0x00  # Master mode, free-running
+    SLAVE_SYNCHRONIZED = 0x01  # Slave mode, synchronized to XVS input
+    MASTER_TRIGGER = 0x10  # Master mode with trigger
+    SLAVE_TRIGGER = 0x11  # Slave mode with trigger
+
+
 class Imx715Cam:
+    """IMX715 camera driver with master/slave synchronization support.
+
+    Supports multiple synchronization modes for coordinated multi-camera operation:
+    - MASTER_FREE_RUN: Independent operation (default)
+    - SLAVE_SYNCHRONIZED: Synchronized to external XVS signal
+    - MASTER_TRIGGER: Generates trigger output for external devices
+    - SLAVE_TRIGGER: Synchronized with trigger capability
+
+    The synchronization mode is controlled via register 0x3003 (XMASTER bit).
+    Slave mode cameras automatically synchronize their frame acquisition to the
+    XVS input signal, achieving pixel-level synchronization with other cameras.
+    """
+
     def __init__(
         self,
         hololink_channel,
         i2c_bus=hololink_module.CAM_I2C_BUS,
         expander_configuration=0,
+        sync_mode=None,
     ):
         self._hololink = hololink_channel.hololink()
         self._i2c = self._hololink.get_i2c(i2c_bus)
         self._mode = imx715lp_mode.Imx715_Mode.Unknown
         self._width = None
         self._height = None
+        self._sync_mode = sync_mode or SyncMode.MASTER_FREE_RUN
         # Configure i2c expander on the Leopard board
         self._i2c_expander = li_i2c_expander.LII2CExpander(self._hololink, i2c_bus)
         if expander_configuration == 1:
@@ -79,15 +110,21 @@ class Imx715Cam:
         trigger_val=0,
         frequency_mode=PERIOD_30HZ,
         gpio_mux_bits=GPIO_PIN_DEFAULT,
+        sync_mode=None,
+        delay_ns=0,
     ):
         # Make sure this is a version we know about.
         version = self.get_version()
         logging.info("version=%s" % (version,))
         assert version == VERSION
 
+        # Set sync mode if provided
+        if sync_mode is not None:
+            self._sync_mode = sync_mode
+
         # configure the camera based on the mode
         self.configure_camera(imx715_mode_set)
-        self.set_trigger_mode(trigger_val, frequency_mode, gpio_mux_bits)
+        self.configure_sync_mode(trigger_val, frequency_mode, gpio_mux_bits)
 
     def start(self):
         """Start Streaming"""
@@ -152,6 +189,11 @@ class Imx715Cam:
         )
 
     def configure_camera(self, imx715_mode_set):
+        """Configure camera with the specified resolution and bit depth.
+
+        Sets up the image pipeline and MIPI CSI-2 interface. The sync mode
+        (master/slave) is configured separately via configure_sync_mode().
+        """
         self.set_mode(imx715_mode_set)
 
         mode_list = []
@@ -185,7 +227,9 @@ class Imx715Cam:
         else:
             logging.error(f"{imx715_mode_set} mode is not present.")
 
+        # Apply mode-specific configurations
         mode_list.extend(mode_4lane_common)
+        logging.info(f"Configuring camera mode: {imx715_mode_set.name}")
         for reg, val in mode_list:
             if reg == imx715lp_mode.IMX715_TABLE_WAIT_MS:
                 logging.debug(f"sleep {val} ms")
@@ -284,7 +328,7 @@ class Imx715Cam:
             frequency_mode = PERIOD_30HZ
         try:
             vsync_freq_addr = VSYNC_GPIO_MUX_BASE + VSYNC_FREQUENCY_MODE_OFFSET
-            self._hololink.write_uint32(vsync_freq_addr, frequency_mode & 0xF)
+            self._hololink.write_uint32(vsync_freq_addr, frequency_mode)
             logging.debug(f"VSYNC frequency set to mode {frequency_mode}")
         except Exception as e:
             logging.warning(f"Failed to set VSYNC frequency: {e}")
@@ -292,8 +336,8 @@ class Imx715Cam:
     def configure_vsync_gpio(self, gpio_mux_bits):
         try:
             gpio_mux_addr = VSYNC_GPIO_MUX_BASE + VSYNC_GPIO_MUX_EN_OFFSET
-            self._hololink.write_uint32(gpio_mux_addr, gpio_mux_bits & 0xF)
-            logging.debug(f"VSYNC GPIO MUX configured to: 0x{gpio_mux_bits}")
+            self._hololink.write_uint32(gpio_mux_addr, gpio_mux_bits)
+            logging.debug(f"VSYNC GPIO MUX configured to: 0x{gpio_mux_bits:04X}")
         except Exception as e:
             logging.warning(f"Failed to set VSYNC GPIO MUX: {e}")
 
@@ -303,4 +347,85 @@ class Imx715Cam:
         if trigger_val:
             self.configure_vsync_gpio(gpio_mux_bits)
             self.set_vsync_frequency(frequency_mode)
-        self.set_register(imx715lp_mode.REG_TRIGGER_MODE, trigger_val)
+
+    def enable_vsync_gen(self):
+        try:
+            enable_Addr = VSYNC_GPIO_MUX_BASE + VSYNC_ENABLE_OFFSET
+            self._hololink.write_uint32(enable_Addr, 1)
+            logging.debug(f"VSYNC generator enabled")
+        except Exception as e:
+            logging.warning(f"Failed to enable VSYNC generator: {e}")
+
+    def configure_sync_mode(
+        self,
+        trigger_val=0,
+        frequency_mode=PERIOD_30HZ,
+        gpio_mux_bits=GPIO_PIN_DEFAULT,
+        delay_ns=0,
+    ):
+        """Configure master/slave synchronization mode and trigger settings.
+
+        Slave mode synchronizes frame acquisition to the XVS input signal.
+        Master/slave is controlled by XMASTER at 0x3003, not the drive-strength
+        register 0x30C1.
+        """
+        is_slave = self._sync_mode in (
+            SyncMode.SLAVE_SYNCHRONIZED,
+            SyncMode.SLAVE_TRIGGER,
+        )
+        xmaster_val = (
+            imx715lp_mode.SLAVE_MODE_VALUE
+            if is_slave
+            else imx715lp_mode.MASTER_MODE_VALUE
+        )
+
+        logging.info(
+            f"Configuring sync mode: {self._sync_mode.name} (XMASTER=0x{xmaster_val:02X})"
+        )
+
+        self.set_register(imx715lp_mode.REG_XMASTER, xmaster_val)
+
+        has_trigger = bool(self._sync_mode.value & 0x10)
+        if has_trigger:
+            self.configure_vsync_gpio(gpio_mux_bits)
+            self.set_vsync_frequency(frequency_mode)
+            self.enable_vsync_gen()
+            logging.debug(
+                f"Trigger enabled: frequency mode {frequency_mode}, GPIO MUX bits 0x{gpio_mux_bits:02X}"
+            )
+
+    def set_sync_mode(self, sync_mode, trigger_enabled=False):
+        """Set the camera synchronization mode (master or slave).
+
+        Args:
+            sync_mode: SyncMode enum value
+            trigger_enabled: If True, trigger output is enabled
+        """
+        if not isinstance(sync_mode, SyncMode):
+            raise ValueError(
+                f"sync_mode must be a SyncMode enum, got {type(sync_mode)}"
+            )
+
+        self._sync_mode = sync_mode
+        is_slave = sync_mode in (SyncMode.SLAVE_SYNCHRONIZED, SyncMode.SLAVE_TRIGGER)
+        xmaster_val = (
+            imx715lp_mode.SLAVE_MODE_VALUE
+            if is_slave
+            else imx715lp_mode.MASTER_MODE_VALUE
+        )
+
+        logging.info(
+            f"Setting sync mode to: {sync_mode.name} (trigger: {trigger_enabled})"
+        )
+        self.set_register(imx715lp_mode.REG_XMASTER, xmaster_val)
+
+    def get_sync_mode(self):
+        """Get the current synchronization mode."""
+        return self._sync_mode
+
+    def is_slave_mode(self):
+        """Check if camera is in slave synchronization mode."""
+        return self._sync_mode in (
+            SyncMode.SLAVE_SYNCHRONIZED,
+            SyncMode.SLAVE_TRIGGER,
+        )
