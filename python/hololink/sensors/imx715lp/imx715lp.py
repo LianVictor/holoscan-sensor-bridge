@@ -51,10 +51,24 @@ PERIOD_120HZ = 4
 
 
 class SyncMode(Enum):
-    """Camera synchronization modes."""
+    """Camera synchronization modes.
 
-    MASTER_FREE_RUN = 0x00  # Master mode, free-running
-    SLAVE_SYNCHRONIZED = 0x01  # Slave mode, synchronized to XVS input
+    The IMX715 supports three synchronization modes (see the "Additional
+    Function of Synchronizing Sensors" app note):
+
+    - Internal synchronizing master mode: the sensor free-runs on its own
+      VMAX/HMAX clock and drives XVS/XHS out to synchronize other devices
+      (XMASTER=0, EXTMODE=0, XVS/XHS = output).
+    - External synchronizing master mode: the sensor free-runs on its own
+      clock but re-synchronizes to an external XVS signal received on its XVS
+      input pin; XHS stays an output (XMASTER=0, EXTMODE=1, XVS = input).
+    - Slave mode: the sensor is driven entirely by external XVS and XHS inputs
+      (XMASTER=1, XVS/XHS = input).
+    """
+
+    MASTER_FREE_RUN = 0x00  # Internal sync master, free-running (drives XVS/XHS)
+    SLAVE_SYNCHRONIZED = 0x01  # Slave mode, synchronized to XVS/XHS input
+    MASTER_EXTERNAL_SYNC = 0x02  # External sync master, locks to external XVS input
     MASTER_TRIGGER = 0x10  # Master mode with trigger
     SLAVE_TRIGGER = 0x11  # Slave mode with trigger
 
@@ -363,27 +377,58 @@ class Imx715Cam:
         gpio_mux_bits=GPIO_PIN_DEFAULT,
         delay_ns=0,
     ):
-        """Configure master/slave synchronization mode and trigger settings.
+        """Configure the synchronization mode and trigger settings.
 
-        Slave mode synchronizes frame acquisition to the XVS input signal.
-        Master/slave is controlled by XMASTER at 0x3003, not the drive-strength
-        register 0x30C1.
+        Writes the three registers the IMX715 app note uses to select the
+        synchronization mode:
+          - 0x3003 XMASTER: master (0) vs slave (1)
+          - 0x30C1 XVS/XHS pin direction: output (0h) vs Hi-Z/input (3h)
+          - 0x30CE EXTMODE: internal (0) vs external (1) synchronism, master only
+
+        Internal sync master drives XVS/XHS out; external sync master takes XVS
+        as an input (and keeps XHS an output); slave takes both as inputs.
         """
         is_slave = self._sync_mode in (
             SyncMode.SLAVE_SYNCHRONIZED,
             SyncMode.SLAVE_TRIGGER,
         )
-        xmaster_val = (
-            imx715lp_mode.SLAVE_MODE_VALUE
-            if is_slave
-            else imx715lp_mode.MASTER_MODE_VALUE
-        )
+        is_external_sync = self._sync_mode is SyncMode.MASTER_EXTERNAL_SYNC
 
-        logging.info(
-            f"Configuring sync mode: {self._sync_mode.name} (XMASTER=0x{xmaster_val:02X})"
-        )
+        if is_slave:
+            # Slave mode: frame timing comes entirely from the master's XVS/XHS.
+            self.set_register(
+                imx715lp_mode.REG_XMASTER, imx715lp_mode.SLAVE_MODE_VALUE
+            )
+            self.set_register(
+                imx715lp_mode.REG_XVS_XHS_DRV, imx715lp_mode.XVS_XHS_DRV_ALL_INPUT
+            )
+        elif is_external_sync:
+            # External synchronizing master mode: free-run on the local clock but
+            # re-synchronize to an external XVS input. XVS is Hi-Z (input), XHS
+            # stays an output, and EXTMODE selects external synchronism.
+            self.set_register(
+                imx715lp_mode.REG_XMASTER, imx715lp_mode.MASTER_MODE_VALUE
+            )
+            self.set_register(
+                imx715lp_mode.REG_XVS_XHS_DRV,
+                imx715lp_mode.XVS_XHS_DRV_XVS_IN_XHS_OUT,
+            )
+            self.set_register(
+                imx715lp_mode.REG_EXTMODE, imx715lp_mode.EXTMODE_EXTERNAL_SYNC
+            )
+        else:
+            # Internal synchronizing master mode: free-run and drive XVS/XHS out.
+            self.set_register(
+                imx715lp_mode.REG_XMASTER, imx715lp_mode.MASTER_MODE_VALUE
+            )
+            self.set_register(
+                imx715lp_mode.REG_XVS_XHS_DRV, imx715lp_mode.XVS_XHS_DRV_ALL_OUTPUT
+            )
+            self.set_register(
+                imx715lp_mode.REG_EXTMODE, imx715lp_mode.EXTMODE_INTERNAL_SYNC
+            )
 
-        self.set_register(imx715lp_mode.REG_XMASTER, xmaster_val)
+        logging.info(f"Configuring sync mode: {self._sync_mode.name}")
 
         has_trigger = bool(self._sync_mode.value & 0x10)
         if has_trigger:

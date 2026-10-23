@@ -400,7 +400,7 @@ def main():
         # Without --trigger: left=master (drives XVS), right=slave (follows via PCB trace).
         # With --trigger: both=slave, FPGA vsync generator drives both via CAM_GPIO.
         sync_mode_left = hololink_module.sensors.imx715lp.SyncMode.MASTER_FREE_RUN
-        sync_mode_right = hololink_module.sensors.imx715lp.SyncMode.SLAVE_SYNCHRONIZED
+        sync_mode_right = hololink_module.sensors.imx715lp.SyncMode.MASTER_EXTERNAL_SYNC
 
         if args.trigger:
             sync_mode_left = hololink_module.sensors.imx715lp.SyncMode.SLAVE_TRIGGER

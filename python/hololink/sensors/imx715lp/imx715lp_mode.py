@@ -46,8 +46,20 @@ SLAVE_MODE_VALUE = 0x01
 # XVS/XHS output select: 0x30C0 XVSOUTSEL[1:0], XHSOUTSEL[3:2]
 REG_XVSOUTSEL = 0x30C0
 
-# XVS/XHS drive strength: 0x30C1 XVS_DRV[1:0], XHS_DRV[3:2]
+# XVS/XHS pin input/output select: 0x30C1 XVS_DRV[1:0], XHS_DRV[3:2]
+# Per the IMX715 "Additional Function of Synchronizing Sensors" app note, each
+# field selects the pin direction: 0h = output (driven), 3h = Hi-Z (input).
 REG_XVS_XHS_DRV = 0x30C1
+XVS_XHS_DRV_ALL_OUTPUT = 0x00  # XVS output, XHS output (internal sync master)
+XVS_XHS_DRV_XVS_IN_XHS_OUT = 0x03  # XVS Hi-Z/input, XHS output (external sync master)
+XVS_XHS_DRV_ALL_INPUT = 0x0F  # XVS Hi-Z/input, XHS Hi-Z/input (slave)
+
+# Synchronism select: 0x30CE EXTMODE (master mode only; 0=internal, 1=external).
+# Internal sync: sensor free-runs on its local clock and drives XVS/XHS out.
+# External sync: sensor free-runs but re-synchronizes to an external XVS input.
+REG_EXTMODE = 0x30CE
+EXTMODE_INTERNAL_SYNC = 0x00
+EXTMODE_EXTERNAL_SYNC = 0x01
 
 
 imx715_start = [
