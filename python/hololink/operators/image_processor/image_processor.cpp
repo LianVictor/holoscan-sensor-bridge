@@ -23,6 +23,7 @@
 #include <cstdint>
 #include <memory>
 #include <string>
+#include <vector>
 
 #include "../operator_util.hpp"
 
@@ -56,10 +57,12 @@ public:
     using ImageProcessorOp::ImageProcessorOp;
 
     // Define a constructor that fully initializes the object.
-    PyImageProcessorOp(holoscan::Fragment* fragment, const py::args& args, int pixel_format, int bayer_format, int32_t optical_black, int cuda_device_ordinal, const std::string& name = "image_processor")
+    PyImageProcessorOp(holoscan::Fragment* fragment, const py::args& args, int pixel_format, int bayer_format, int32_t optical_black, float gamma, const std::vector<float>& color_gains, int cuda_device_ordinal, const std::string& name = "image_processor")
         : ImageProcessorOp(holoscan::ArgList { holoscan::Arg { "pixel_format", pixel_format },
             holoscan::Arg { "bayer_format", bayer_format },
             holoscan::Arg { "optical_black", optical_black },
+            holoscan::Arg { "gamma", gamma },
+            holoscan::Arg { "color_gains", color_gains },
             holoscan::Arg { "cuda_device_ordinal", cuda_device_ordinal } })
     {
         add_positional_condition_and_resource_args(this, args);
@@ -80,11 +83,13 @@ PYBIND11_MODULE(_image_processor, m)
 
     auto op = py::class_<ImageProcessorOp, PyImageProcessorOp, holoscan::Operator, std::shared_ptr<ImageProcessorOp>>(m,
         "ImageProcessorOp")
-                  .def(py::init<holoscan::Fragment*, const py::args&, int, int, int32_t, int, const std::string&>(),
+                  .def(py::init<holoscan::Fragment*, const py::args&, int, int, int32_t, float, const std::vector<float>&, int, const std::string&>(),
                       "fragment"_a,
                       "pixel_format"_a,
                       "bayer_format"_a,
                       "optical_black"_a = 0,
+                      "gamma"_a = 1.0f,
+                      "color_gains"_a = std::vector<float> { 1.0f, 1.0f, 1.0f },
                       "cuda_device_ordinal"_a = 0,
                       "name"_a = "image_processor"s)
                   .def("setup", &ImageProcessorOp::setup, "spec"_a);

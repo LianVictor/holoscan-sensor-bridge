@@ -19,6 +19,7 @@
 #define SRC_HOLOLINK_OPERATORS_IMAGE_PROCESSOR_IMAGE_PROCESSOR
 
 #include <memory>
+#include <vector>
 
 #include <hololink/operators/csi_to_bayer/csi_to_bayer.hpp>
 
@@ -42,6 +43,8 @@ private:
     holoscan::Parameter<int> pixel_format_;
     holoscan::Parameter<int> bayer_format_;
     holoscan::Parameter<int32_t> optical_black_;
+    holoscan::Parameter<float> gamma_;
+    holoscan::Parameter<std::vector<float>> color_gains_;
     holoscan::Parameter<int> cuda_device_ordinal_;
 
     CUcontext cuda_context_ = nullptr;

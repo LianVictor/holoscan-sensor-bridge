@@ -17,6 +17,8 @@
 
 #include "image_processor.hpp"
 
+#include <cmath>
+
 #include <hololink/common/cuda_helper.hpp>
 #include <hololink/core/logging_internal.hpp>
 #include <holoscan/holoscan.hpp>
@@ -189,14 +191,26 @@ __global__ void applyOperations(unsigned short *image,
 
     float value = (float)(image[index]);
 
-    // apply gain
+    // apply auto white-balance gain
     const unsigned int channel = getBayerOffset(idx_x, idx_y);
     value *= gains[channel];
+
+    // apply manual per-channel (R, G, B) color gain on top of auto white balance
+    const float color_gains[3] = { COLOR_GAIN_R, COLOR_GAIN_G, COLOR_GAIN_B };
+    value *= color_gains[channel];
 
     const float range = (1 << (sizeof(unsigned short) * 8)) - 1;
 
     // clamp
     value = max(min(value, range), 0.f);
+
+#if APPLY_GAMMA
+    // apply gamma: normalize to [0, 1], raise to 1/gamma, scale back.
+    // INV_GAMMA == 1.0 / gamma is computed on the host.
+    value = range * powf(value / range, INV_GAMMA);
+    // powf can nudge the result slightly outside the range; clamp again
+    value = max(min(value, range), 0.f);
+#endif
 
     image[index] = (unsigned short)(value + 0.5f);
 }
@@ -220,6 +234,11 @@ void ImageProcessorOp::setup(holoscan::OperatorSpec& spec)
     spec.param(bayer_format_, "bayer_format", "BayerFormat", "Bayer format (one of hololink::csi::BayerFormat)");
     spec.param(pixel_format_, "pixel_format", "PixelFormat", "Pixel format (one of hololink::csi::PixelFormat)");
     spec.param(optical_black_, "optical_black", "Optical Black", "optical black value", 0);
+    spec.param(gamma_, "gamma", "Gamma",
+        "gamma correction value applied to each channel; 1.0 disables gamma", 1.0f);
+    spec.param(color_gains_, "color_gains", "Color Gains",
+        "manual per-channel (R, G, B) gains applied on top of auto white balance",
+        std::vector<float> { 1.0f, 1.0f, 1.0f });
     spec.param(
         cuda_device_ordinal_, "cuda_device_ordinal", "CudaDeviceOrdinal", "Device to use for CUDA operations", 0);
 }
@@ -309,6 +328,21 @@ void ImageProcessorOp::start()
         throw std::runtime_error(fmt::format("Camera bayer format {} not supported.", int(bayer_format_.get())));
     }
 
+    // Manual per-channel color gains (R, G, B) applied on top of auto white balance.
+    const auto color_gains = color_gains_.get();
+    if (color_gains.size() != CHANNELS) {
+        throw std::runtime_error(fmt::format(
+            "color_gains must have {} values (R, G, B), got {}", CHANNELS, color_gains.size()));
+    }
+
+    // Gamma: pass the inverse to the kernel and skip the powf entirely when gamma == 1.
+    float gamma = gamma_.get();
+    if (gamma <= 0.f) {
+        throw std::runtime_error(fmt::format("gamma must be > 0, got {}", gamma));
+    }
+    const bool apply_gamma = std::fabs(gamma - 1.0f) > 1e-3f;
+    const float inv_gamma = 1.0f / gamma;
+
     cuda_function_launcher_.reset(new hololink::common::CudaFunctionLauncher(
         source, { "applyBlackLevel", "histogram", "calcWBGains", "applyOperations" },
         { fmt::format("-D CHANNELS={}", CHANNELS),
@@ -321,7 +355,12 @@ void ImageProcessorOp::start()
             fmt::format("-D HISTOGRAM_WARP_COUNT={}", histogram_warp_count),
             fmt::format("-D HISTOGRAM_THREADBLOCK_SIZE={}", histogram_threadblock_size_),
             fmt::format("-D HISTOGRAM_THREADBLOCK_MEMORY={}", histogram_threadblock_memory),
-            fmt::format("-D OPTICAL_BLACK={}", optical_black_.get() * (1 << least_significant_bit)) }));
+            fmt::format("-D OPTICAL_BLACK={}", optical_black_.get() * (1 << least_significant_bit)),
+            fmt::format("-D COLOR_GAIN_R={:.8f}f", color_gains[0]),
+            fmt::format("-D COLOR_GAIN_G={:.8f}f", color_gains[1]),
+            fmt::format("-D COLOR_GAIN_B={:.8f}f", color_gains[2]),
+            fmt::format("-D APPLY_GAMMA={}", apply_gamma ? 1 : 0),
+            fmt::format("-D INV_GAMMA={:.8f}f", inv_gamma) }));
 
     white_balance_gains_memory_.reset([] {
         CUdeviceptr mem = 0;

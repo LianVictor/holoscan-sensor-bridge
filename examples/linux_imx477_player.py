@@ -35,6 +35,8 @@ class MicroApplication(holoscan.core.Application):
         hololink_channel,
         camera,
         frame_limit,
+        gamma,
+        color_gains,
     ):
         logging.info("__init__")
         super().__init__()
@@ -45,6 +47,8 @@ class MicroApplication(holoscan.core.Application):
         self._hololink_channel = hololink_channel
         self._camera = camera
         self._frame_limit = frame_limit
+        self._gamma = gamma
+        self.color_gains = color_gains
 
     def compose(self):
         logging.info("compose")
@@ -100,6 +104,8 @@ class MicroApplication(holoscan.core.Application):
             optical_black=100,
             bayer_format=bayer_format.value,
             pixel_format=pixel_format.value,
+            gamma=self._gamma,
+            color_gains=self.color_gains,
         )
 
         rgba_components_per_pixel = 4
@@ -164,8 +170,22 @@ def main():
         "--cam",
         type=int,
         default=0,
-        choices=(0, 1),
+        choices=(0, 1, 2, 3),
         help="which camera to stream: 0 to stream camera connected to j14 or 1 to stream camera connected to j17 (default is 0)",
+    )
+    parser.add_argument(
+        "--gamma",
+        type=float,
+        default=1.0,
+        help="gamma correction applied by the image processor (1.0 = disabled)",
+    )
+    parser.add_argument(
+        "--color-gains",
+        type=float,
+        nargs=3,
+        metavar=("R", "G", "B"),
+        default=[1.0, 1.0, 1.0],
+        help="Manual per-channel RGB gains applied on top of auto white balance (range of [0-1.0] per each channel)",
     )
     parser.add_argument(
         "--pattern",
@@ -225,6 +245,8 @@ def main():
         hololink_channel,
         camera,
         args.frame_limit,
+        args.gamma,
+        args.color_gains,
     )
 
     # Run it.
